@@ -77,7 +77,7 @@ jobs:
         with:
           name: runtime-${{ matrix.abi }}
           path: runtime.zip
-          retention-days: 7
+          retention-days: 1
 
   build-apk:
     strategy:
@@ -156,6 +156,7 @@ jobs:
         with:
           name: dsh-android-debug-apk-${{ matrix.abi }}
           path: dist/*.apk
+          retention-days: 1   # 仅 job 间传递用，避免 90 天默认堆积百 MB×N（曾堆 32GB）
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
