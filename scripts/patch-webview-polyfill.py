@@ -12,13 +12,17 @@ ROM 常无更新渠道）缺失这些 API → 前端 JS 抛 TypeError → WebUI 
 import os
 import sys
 
-MARK = '<!-- [dsh-android] legacy-webview polyfill (Object.hasOwn / .at) v1 -->'
-POLYFILL = '''<script>
+MARK = '<!-- [dsh-android] legacy-webview polyfill v2 (Object.hasOwn / .at / replaceChildren / replaceAll) -->'
+POLYFILL = '''<!-- [dsh-android] legacy-webview polyfill v2 (Object.hasOwn / .at / replaceChildren / replaceAll) -->
+<script>
 /* [dsh-android] polyfill for Android 11 legacy WebView (Chrome <92) */
 if (!Object.hasOwn) { Object.defineProperty(Object, 'hasOwn', { value: function (o, k) { if (o == null) throw new TypeError("Cannot convert undefined or null to object"); return Object.prototype.hasOwnProperty.call(Object(o), k); }, configurable: true, writable: true }); }
 if (!Array.prototype.at) { Object.defineProperty(Array.prototype, "at", { value: function (n) { n = Math.trunc(n) || 0; if (n < 0) n += this.length; if (n < 0 || n >= this.length) return undefined; return this[n]; }, writable: true, enumerable: false, configurable: true }); }
 if (!String.prototype.at) { Object.defineProperty(String.prototype, "at", { value: function (n) { n = Math.trunc(n) || 0; if (n < 0) n += this.length; if (n < 0 || n >= this.length) return undefined; return this[n]; }, writable: true, enumerable: false, configurable: true }); }
-</script>'''
+if (!Element.prototype.replaceChildren) { Object.defineProperty(Element.prototype, "replaceChildren", { value: function () { while (this.lastChild) this.removeChild(this.lastChild); if (arguments.length) this.append.apply(this, arguments); }, writable: true, enumerable: false, configurable: true }); }
+if (!String.prototype.replaceAll) { Object.defineProperty(String.prototype, "replaceAll", { value: function (s, r) { if (s instanceof RegExp) { if (!s.global) throw new TypeError("replaceAll must use a global RegExp"); return this.replace(s, r); } return this.split(s).join(r === undefined ? "undefined" : String(r)); }, writable: true, enumerable: false, configurable: true }); }
+</script>
+'''
 ANCHOR = '<script type="module" crossorigin'
 
 
