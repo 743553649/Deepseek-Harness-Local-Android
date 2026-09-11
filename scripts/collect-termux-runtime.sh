@@ -117,6 +117,11 @@ if command -v python3 >/dev/null 2>&1; then
   python3 "$(dirname "$0")/../scripts/patch-apiproxy.py" "$NM" || echo "WARN: apiproxy patch failed; openPath falls back to native opener"
 fi
 
+# ---- 3.6b D4: legacy WebView polyfill（Android 11 等，Object.hasOwn / .at 缺失致 WebUI 转圈）----
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$(dirname "$0")/../scripts/patch-webview-polyfill.py" "$NM" || echo "WARN: webview polyfill patch failed"
+fi
+
 # [koffi] FFI 库：仅 glibc/x64 预编译。真实消费方只有 dsh-subprocess-local 的
 # Win32 进程树强杀（Android 死代码），但其类型注册在模块顶层执行必须不抛错。
 K="$NM/koffi"
