@@ -177,7 +177,8 @@ object AgentBridge {
             val c = (java.net.URL("http://127.0.0.1:3080/").openConnection()
                     as java.net.HttpURLConnection).apply { connectTimeout = 4000; readTimeout = 4000 }
             val code = c.responseCode
-            val head = c.getInputStream().use { it.readNBytes(120).toString(Charsets.UTF_8) }
+            // readNBytes(int) 是 API 33+；Android 11 上会 NoSuchMethod——用 Kotlin readBytes 截断
+            val head = c.getInputStream().use { it.readBytes().take(120).toByteArray().toString(Charsets.UTF_8) }
             c.disconnect()
             "HTTP $code | head: ${head.replace(java.lang.System.lineSeparator(), " ")}"
         }.getOrElse { "FAIL: ${it.message}" }
