@@ -113,6 +113,7 @@ object AgentBridge {
             method == "GET" && path == "/screen" -> screen()
             method == "POST" && path == "/tap" -> tap(body)
             method == "GET" && path == "/ext/list" -> extList(ctx)
+            method == "GET" && path == "/diag" -> diag(ctx)
             method == "POST" && path == "/ext/install" -> extInstall(ctx, body)
             else -> 404 to """{"ok":false,"error":"unknown route"}"""
         }
@@ -143,6 +144,94 @@ object AgentBridge {
         } catch (e: Exception) {
             500 to """{"ok":false,"error":"${e.message}"}"""
         }
+    }
+
+    /**
+     * GET /diag → HTML 自诊断页（Android 11 等老设备排障）：
+     * WebView UA 与 JS API 缺失检测、引擎状态、3080 HTTP/WS 探测、
+     * runtime 版本、polyfill 落地、engine.log 尾部。用户在设备浏览器打开截图即可。
+     */
+    private fun diag(ctx: Context): Pair<Int, String> {
+        val app = ctx.applicationContext as app.dsh.mobile.DshApp
+        val engineState = try {
+            app.supervisor.state.value.toString()
+        } catch (e: Exception) { "unknown: " + e.message }
+        val runtimeVer = runCatching {
+            java.io.File(EngineConfig.engineRoot(ctx), ".runtime-version").readText().trim()
+        }.getOrDefault("(unreadable)")
+        val feHtml = runCatching {
+            java.io.File(
+                EngineConfig.engineRoot(ctx),
+                "lib/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html"
+            ).readText()
+        }.getOrDefault("")
+        val poly = if (feHtml.isEmpty()) "frontend index.html missing!"
+            else if (feHtml.contains("legacy-webview polyfill")) "present" else "MISSING"
+        val logTail = runCatching {
+            val f = java.io.File(ctx.filesDir, "engine.log")
+            if (f.isFile) f.readText().takeLast(2500) else "(no engine.log)"
+        }.getOrDefault("(log read failed)")
+
+        // 3080 HTTP 探测
+        val httpProbe = runCatching {
+            val c = (java.net.URL("http://127.0.0.1:3080/").openConnection()
+                    as java.net.HttpURLConnection).apply { connectTimeout = 4000; readTimeout = 4000 }
+            val code = c.responseCode
+            val head = c.getInputStream().use { it.readNBytes(120).toString(Charsets.UTF_8) }
+            c.disconnect()
+            "HTTP $code | head: ${head.replace(java.lang.System.lineSeparator(), " ")}"
+        }.getOrElse { "FAIL: ${it.message}" }
+
+        // WS 握手探测（多候选路径）。CRLF 由常量拼接，避免源码内嵌换行歧义。
+        val crlf = "\r\n"
+        val wsProbe = listOf("/ws", "/", "/api/ws", "/socket").joinToString("<br>") { p ->
+            runCatching {
+                java.net.Socket("127.0.0.1", 3080).use { sock ->
+                    sock.soTimeout = 4000
+                    val req = "GET $p HTTP/1.1" + crlf +
+                        "Host: 127.0.0.1:3080" + crlf +
+                        "Upgrade: websocket" + crlf +
+                        "Connection: Upgrade" + crlf +
+                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" + crlf +
+                        "Sec-WebSocket-Version: 13" + crlf + crlf
+                    sock.getOutputStream().write(req.toByteArray())
+                    sock.getOutputStream().flush()
+                    val first = ByteArray(64)
+                    val n = sock.getInputStream().read(first)
+                    if (n <= 0) "no response" else String(first, 0, n).split(crlf)[0]
+                }
+            }.getOrElse { "FAIL: ${it.message}" }
+        }.let { "WS handshake:<br>" + it }
+
+        val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSH diag</title><style>body{font-family:monospace;background:#111;color:#eee;padding:12px;font-size:13px;word-break:break-all}pre{white-space:pre-wrap;background:#1c1c1c;padding:8px;border-radius:6px}h3{color:#7DD3FC;margin:14px 0 4px}</style></head><body>
+<h3>1. WebView UA</h3><pre id="ua"></pre>
+<h3>2. JS API 检测（false=缺失）</h3><pre id="api"></pre>
+<h3>3. 引擎状态</h3><pre>$engineState</pre>
+<h3>4. 3080 HTTP 探测</h3><pre>$httpProbe</pre>
+<h3>5. WebSocket 探测</h3><pre>$wsProbe</pre>
+<h3>6. runtime 版本</h3><pre>$runtimeVer</pre>
+<h3>7. 前端 polyfill</h3><pre>$poly</pre>
+<h3>8. engine.log 尾部</h3><pre>$logTail</pre>
+<script>
+document.getElementById('ua').textContent = navigator.userAgent;
+var checks = [
+  ['Object.hasOwn (93+)', function(){ return typeof Object.hasOwn === 'function'; }],
+  ['Array.prototype.at (92+)', function(){ return typeof Array.prototype.at === 'function'; }],
+  ['String.prototype.at (92+)', function(){ return typeof String.prototype.at === 'function'; }],
+  ['Element.replaceChildren (86+)', function(){ return typeof Element.prototype.replaceChildren === 'function'; }],
+  ['String.replaceAll (85+)', function(){ return typeof String.prototype.replaceAll === 'function'; }],
+  ['crypto.randomUUID (92+)', function(){ return typeof crypto.randomUUID === 'function'; }],
+  ['structuredClone (98+)', function(){ return typeof structuredClone === 'function'; }],
+  ['Array.findLast (97+)', function(){ return typeof Array.prototype.findLast === 'function'; }]
+];
+document.getElementById('api').textContent = checks.map(function(c){
+  var ok = false; try { ok = c[1](); } catch (e) { ok = 'ERR ' + e.message; }
+  return c[0] + ' = ' + ok;
+}).join('
+');
+</script></body></html>"""
+        return 200 to html
     }
 
     /**
