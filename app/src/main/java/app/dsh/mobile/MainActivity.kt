@@ -338,9 +338,11 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        // 注意：引擎由前台服务持有，Activity 销毁不影响后台任务
+        // 注意：引擎由前台服务持有，Activity 销毁不影响后台任务。
+        // 首启跳 Onboarding 时本 Activity 立即销毁，webView 尚未初始化——
+        // lateinit 直接访问会崩（Android 11 新用户首启闪退实测）。
         uiScope.cancel()
-        webView.destroy()
+        if (::webView.isInitialized) webView.destroy()
         super.onDestroy()
     }
 
