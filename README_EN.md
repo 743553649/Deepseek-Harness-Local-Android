@@ -1,6 +1,6 @@
 ﻿# DSH Mobile
 
-**Run a full AI Agent on your phone — no Root, no Termux, no PC required.**
+**Deepseek-Harness-Local-Android — Run the full DeepSeek Harness AI agent locally on Android (Local for Android) — no root, no Termux, no PC needed.**
 
 [![CI](https://github.com/Soodok/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/Soodok/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
 ![Release](https://img.shields.io/badge/release-v1.2.20-blue)

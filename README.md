@@ -1,6 +1,6 @@
 ﻿# DSH Mobile
 
-**在手机上运行完整的 AI Agent —— 无需 Root，无需 Termux，无需电脑。**
+**Deepseek-Harness-Local-Android — 在手机上运行完整的 DeepSeek Harness AI Agent（Local for Android）—— 无需 Root，无需 Termux，无需电脑。** —— 无需 Root，无需 Termux，无需电脑。**
 
 [![CI](https://github.com/Soodok/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/Soodok/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
 ![Release](https://img.shields.io/badge/release-v1.2.20-blue)
