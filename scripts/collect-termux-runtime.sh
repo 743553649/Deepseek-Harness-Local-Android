@@ -92,7 +92,10 @@ rm -rf "$ROOT/data"
 # --ignore-scripts 禁掉 postinstall，防Linux-x64 native 构建/二进制混入。
 # 若未来引入真 native 依赖（如 better-sqlite3），需针对 bionic 十字编译，
 # 到时按报错在此处做平台裁剪或替换实现。
-DSH_VERSION="${DSH_VERSION:-latest}"   # 可 pinned，如 DSH_VERSION=0.1.1-rc.2
+# 锁定版本：与本地验证过的 runtime 完全一致。浮动 latest 曾撞上上游 0.1.5-rc.1
+# 重构（session-persistence-jsonl 从依赖树移除 → 补丁断言失败 → CI 全挂）。
+# 上游适配后可再升级（需重跑本地验证链）。
+DSH_VERSION="${DSH_VERSION:-0.1.1-rc.2}"
 mkdir -p "$WORK/bundle" && cd "$WORK/bundle"
 printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s"}}' \
   "$DSH_VERSION" > package.json
@@ -114,12 +117,14 @@ NM="$ROOT/lib/node_modules"
 # "path open failed: native path opener is unsupported on android"。
 # 补丁脚本单一真源（与本地 build_runtime.py 同源），幂等可重跑。
 if command -v python3 >/dev/null 2>&1; then
-  python3 "$(dirname "$0")/../scripts/patch-apiproxy.py" "$NM" || echo "WARN: apiproxy patch failed; openPath falls back to native opener"
+  SCRIPTS_DIR="$GITHUB_WORKSPACE/scripts"
+  [ -d "$SCRIPTS_DIR" ] || SCRIPTS_DIR="$(cd "$(dirname "$0")/.." && pwd)/scripts"
+  python3 "$SCRIPTS_DIR/patch-apiproxy.py" "$NM" || echo "WARN: apiproxy patch failed; openPath falls back to native opener"
 fi
 
 # ---- 3.6b D4: legacy WebView polyfill（Android 11 等，Object.hasOwn / .at 缺失致 WebUI 转圈）----
 if command -v python3 >/dev/null 2>&1; then
-  python3 "$(dirname "$0")/../scripts/patch-webview-polyfill.py" "$NM" || echo "WARN: webview polyfill patch failed"
+  python3 "$SCRIPTS_DIR/patch-webview-polyfill.py" "$NM" || echo "WARN: webview polyfill patch failed"
 fi
 
 # [koffi] FFI 库：仅 glibc/x64 预编译。真实消费方只有 dsh-subprocess-local 的
@@ -203,6 +208,9 @@ console.log("sandbox-local patched ok");
 # 首次会话落盘原本使用 fs.promises.link(tmp, finalPath) 做原子发布；临时文件
 # 与目标文件同目录时，rename 同样具备原子发布语义，且是 Android 允许的普通操作。
 SP="$NM/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js"
+if [ ! -f "$SP" ]; then
+  echo "WARN: dsh-session-persistence-jsonl not in dependency tree (upstream restructure) - patch skipped"
+else
 node -e '
 const fs = require("fs");
 const p = process.argv[1];
@@ -228,6 +236,7 @@ if (out.includes("await link(tmp, finalPath);") || !out.includes("await rename(t
 }
 console.log("session persistence patched ok: link -> rename");
 ' "$SP"
+fi
 
 # [@vscode/ripgrep] npm 在 Ubuntu runner 上会选择 linux-x64 optional binary，
 # 不适用于 Android。m1.7 重构：不再对上游 index.js 做文本块替换（上游改版即碎，
