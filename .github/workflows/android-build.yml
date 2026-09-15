@@ -33,12 +33,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ---- 运行时缓存：整条流水线的真正瓶颈 ----
+      # collect 要下载 Termux 运行时依赖闭包（约 18 分钟），而编译 APK 只要 3 分钟。
+      # 产物只随 collect-termux-runtime.sh 与 patch-*.py 变化，故用脚本内容哈希做 key：
+      # 脚本一改自动失效重建，绝不会用到过期/错误的运行时。
+      # 命中时跳过下载 → 一次构建从 ~21 分钟降到 ~4 分钟。
+      # continue-on-error：缓存服务抖动不该拖垮构建，失败时回退为正常下载。
+      - name: 恢复运行时缓存（命中即跳过下载）
+        id: runtime-cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: runtime.zip
+          key: termux-runtime-${{ matrix.termux_arch }}-v1-${{ hashFiles('scripts/collect-termux-runtime.sh', 'scripts/patch-*.py') }}
+
       - name: 收集 Termux Node 运行时（${{ matrix.termux_arch }}）
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq apt dpkg-dev zip
           chmod +x scripts/collect-termux-runtime.sh
           ./scripts/collect-termux-runtime.sh runtime.zip ${{ matrix.termux_arch }}
+
+      - name: 缓存命中确认
+        if: steps.runtime-cache.outputs.cache-hit == 'true'
+        run: |
+          ls -lh runtime.zip
+          echo "✅ 运行时缓存命中，已跳过 Termux 下载"
 
       - name: 校验运行时命令闭包（${{ matrix.abi }}）
         run: |
