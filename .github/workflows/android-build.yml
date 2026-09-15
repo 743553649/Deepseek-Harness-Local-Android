@@ -3,10 +3,11 @@ name: android-build
 # dsh-android 构建流水线
 # v0.1.0-m0.2 · 2026-08-27
 #
-# 双架构矩阵（arm64-v8a 真机 / x86_64 模拟器）：
-#   collect-runtime —— 从 Termux 仓库收集对应架构 node 运行时 → runtime.zip
+# 单架构（arm64-v8a 真机）——x86_64 只对 PC 上的安卓模拟器有意义，
+# 真机装不上（INSTALL_FAILED_NO_MATCHING_ABIS），已移除以免误下与浪费缓存：
+#   collect-runtime —— 从 Termux 仓库收集 aarch64 node 运行时 → runtime.zip
 #   build-apk       —— 注入 runtime.zip 进 assets → gradle -Pabi=... 出 APK
-#   release         —— tag 触发时双架构 APK 一并发布
+#   release         —— tag 触发时发布 APK
 #
 # 注意：collect-runtime 脚本包名已对照 Termux Packages 索引核实过。
 
@@ -27,8 +28,6 @@ jobs:
         include:
           - termux_arch: aarch64
             abi: arm64-v8a
-          - termux_arch: x86_64
-            abi: x86_64
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -107,8 +106,6 @@ jobs:
         include:
           - termux_arch: aarch64
             abi: arm64-v8a
-          - termux_arch: x86_64
-            abi: x86_64
     runs-on: ubuntu-24.04
     needs: [collect-runtime]
     steps:
@@ -141,6 +138,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
+      # ---- 固定 debug 签名密钥 ----
+      # AGP 在全新 runner 上每次都会重新生成 ~/.android/debug.keystore，
+      # 导致每次构建的 APK 签名都不同 → 无法覆盖安装，只能先卸载旧版（Dev 版数据全丢）。
+      # 把这把自动生成的密钥缓存复用，签名从此稳定，可直接覆盖安装。
+      # key 不含动态成分：一旦写入即永远复用同一把密钥。
+      # restore-keys 兜底：万一精确 key 被淘汰，仍可按前缀恢复同一把密钥。
+      - name: 恢复 debug 签名密钥（保证跨构建签名一致）
+        uses: actions/cache@v4
+        with:
+          path: ~/.android
+          key: android-debug-keystore-v1
+          restore-keys: |
+            android-debug-keystore-
 
       - name: 构建 APK（${{ matrix.abi }}）
         run: gradle -p . assembleDebug -Pabi=${{ matrix.abi }} --stacktrace
