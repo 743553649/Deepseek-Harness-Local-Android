@@ -269,6 +269,7 @@ class EngineSupervisor(private val ctx: Context) {
             env = EngineConfig.buildEnv(ctx, EngineConfig.DEFAULT_PORT),
             logFile = logFile(),
             suPath = suPath,
+            port = EngineConfig.DEFAULT_PORT,
         )
     }
 

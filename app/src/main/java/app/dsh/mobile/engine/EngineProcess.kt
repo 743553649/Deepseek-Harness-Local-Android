@@ -105,6 +105,7 @@ class EngineProcess private constructor(
          * fork 引擎进程。
          * @param suPath 非空时以 su 整体提权启动（Root 模式）：cmd=su, args=-c "<node> ..."，
          *               引擎 node 将以 uid 0 运行。null 则直接 exec node（普通/Shizuku 模式）。
+         * @param port 引擎 web 监听端口，必须以 `--port` CLI 参数下发。
          * @throws EngineStartException execve 失败（含 errno）
          */
         fun spawn(
@@ -114,9 +115,15 @@ class EngineProcess private constructor(
             env: Array<String>,
             logFile: File,
             suPath: String? = null,
+            port: Int = EngineConfig.DEFAULT_PORT,
         ): EngineProcess {
             var cmd = nodeBin.absolutePath
-            var args = arrayOf("--expose-internals", entryJs.absolutePath, "web", "--no-open")
+            // 端口必须走 CLI 参数：引擎只解析 `--port`（@deepseek-ai/dsh-web-app/startup.js），
+            // 完全不读 PORT 环境变量。
+            // 血泪事故：共存版只把 PORT 环境变量改成 3180，引擎仍监听默认 3080 →
+            // 与官方版抢端口 → EADDRINUSE → 无限重启「进程异常退出」。
+            var args = arrayOf("--expose-internals", entryJs.absolutePath, "web", "--no-open",
+                "--port", port.toString())
             if (suPath != null) {
                 // Root 整体提权：以 su -c 'exec node ...' 启动。
                 // env 已由调用方按 DSH_ANDROID_PRIV_MODE=ROOT 组装好，su 子进程继承。
