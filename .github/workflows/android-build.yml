@@ -140,18 +140,33 @@ jobs:
           gradle-version: "8.9"
 
       # ---- 固定 debug 签名密钥 ----
-      # AGP 在全新 runner 上每次都会重新生成 ~/.android/debug.keystore，
-      # 导致每次构建的 APK 签名都不同 → 无法覆盖安装，只能先卸载旧版（Dev 版数据全丢）。
-      # 把这把自动生成的密钥缓存复用，签名从此稳定，可直接覆盖安装。
-      # key 不含动态成分：一旦写入即永远复用同一把密钥。
-      # restore-keys 兜底：万一精确 key 被淘汰，仍可按前缀恢复同一把密钥。
-      - name: 恢复 debug 签名密钥（保证跨构建签名一致）
+      # CI 每次都是全新 runner，AGP 会重新生成隐式 debug 密钥库 → 每次构建签名都不同
+      # → 无法覆盖安装，只能先卸载旧版（Dev 版数据全丢）。
+      # 做法：在仓库根放一把固定密钥库 .ci/debug.keystore（位置显式，由 app/build.gradle.kts
+      # 的 signingConfigs 指定 —— 不依赖 AGP 隐式路径，实测那个位置在 CI 上不可控），
+      # 用缓存跨构建复用。首次未命中时现场生成，之后每次都是同一把，签名永久稳定。
+      - name: 恢复固定的 debug 签名密钥
+        id: keystore-cache
+        continue-on-error: true
         uses: actions/cache@v4
         with:
-          path: ~/.android
-          key: android-debug-keystore-v1
+          path: .ci/debug.keystore
+          key: android-debug-keystore-v2
           restore-keys: |
             android-debug-keystore-
+
+      - name: 生成固定 debug 密钥库（缓存未命中时）
+        if: steps.keystore-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .ci
+          keytool -genkeypair -v -keystore .ci/debug.keystore \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      # 把密钥库指纹打进日志：跨构建若指纹一致，即证明签名已固定
+      - name: 打印签名密钥指纹（跨构建应完全一致）
+        run: sha256sum .ci/debug.keystore
 
       - name: 构建 APK（${{ matrix.abi }}）
         run: gradle -p . assembleDebug -Pabi=${{ matrix.abi }} --stacktrace

@@ -42,6 +42,24 @@ android {
         }
     }
 
+    // CI 固定签名：workflow 会在仓库根预置 .ci/debug.keystore 这把固定密钥库，
+    // 使每次云端构建的 APK 签名一致 → 可直接覆盖安装，Dev 版数据不丢。
+    // 文件不存在时保持 AGP 默认行为（本地开发等环境完全不受影响）。
+    // 注意：不依赖 AGP 隐式生成的 ~/.android/debug.keystore —— 那个位置在 CI 上
+    // 不可控（实测每次构建都是新密钥），必须显式指定路径才稳。
+    // 密钥库不入库：.gitignore 里的 *.keystore 已覆盖它。
+    signingConfigs {
+        getByName("debug") {
+            val ciKeystore = rootProject.file(".ci/debug.keystore")
+            if (ciKeystore.exists()) {
+                storeFile = ciKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
