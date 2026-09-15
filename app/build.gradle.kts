@@ -13,7 +13,10 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.dsh.mobile"
+        // 【共存版】包名与官方版（app.dsh.mobile）错开 → 独立数据目录、独立权限授予、
+        // 独立无障碍服务、独立 Shizuku authority（Manifest 用 ${applicationId} 占位符自动跟随）。
+        // namespace 保持 app.dsh.mobile 不动：Kotlin 包名/R 类不变，避免大面积改 import。
+        applicationId = "app.dsh.mobile.dev"
         minSdk = 26
         // 关键决策：targetSdk 28 —— sideload 分发，豁免 Android 10+ 的 W^X 限制，
         // 允许从 filesDir 直接 execve bionic 二进制（Termux 同款策略）。

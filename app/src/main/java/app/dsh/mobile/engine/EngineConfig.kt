@@ -19,7 +19,22 @@ import java.io.File
  */
 object EngineConfig {
 
-    const val DEFAULT_PORT = 3080
+    /**
+     * 【共存版】端口基线 —— 全部端口的唯一真源，改这一处即可整体错开。
+     *
+     * 官方版固定占用 3080/3082/3083。本版整体 +100，使共存版能与官方版
+     * **同时运行**：两个引擎抢同一端口会 EADDRINUSE 反复重启，表现为
+     * 「卡在启动中」（历史事故见 EngineProcess / EngineSupervisor 注释）。
+     *
+     * 派生关系：
+     *   PORT_BASE + 0 → 引擎 web            （DEFAULT_PORT）
+     *   PORT_BASE + 2 → Shizuku 桥          （ShizukuHttpBridge.port = enginePort + 2，自动跟随）
+     *   PORT_BASE + 3 → 能力桥 / 扩展中心   （AGENT_BRIDGE_PORT）
+     */
+    const val PORT_BASE = 3180
+    const val DEFAULT_PORT = PORT_BASE
+    const val AGENT_BRIDGE_PORT = PORT_BASE + 3
+
     const val HEALTH_TIMEOUT_MS = 45_000L
     const val HEALTH_INTERVAL_MS = 500L
 
@@ -203,7 +218,7 @@ object EngineConfig {
 
     /**
      * Agent 能力包装器（v1.1.0）：notify / scr，全模式注入。
-     * 二者都是 node fetch 到 AgentBridge (127.0.0.1:3083) 的薄包装：
+     * 二者都是 node fetch 到 AgentBridge (AGENT_BRIDGE_PORT) 的薄包装：
      *  - notify [message]        → POST /notify（任务完成系统通知；AGENTS.md 约定任务完成必调）
      *  - scr dump                → GET  /screen（读屏：可见文本+坐标 JSON）
      *  - scr tap <x> <y>         → POST /tap 坐标点击
@@ -218,7 +233,7 @@ object EngineConfig {
                 "msg=\"${'$'}*\"\n" +
                 "exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
                 "  const body = JSON.stringify({ title: \"Agent 任务\", body: process.argv[1] || \"任务已完成\" });\n" +
-                "  fetch(\"http://127.0.0.1:3083/notify\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
+                "  fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/notify\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
                 "    .then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(2));\n" +
                 "' \"${'$'}msg\"\n")
             notify.setExecutable(true, false)
@@ -230,20 +245,20 @@ object EngineConfig {
                 "case \"${'$'}1\" in\n" +
                 "  dump)\n" +
                 "    exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
-                "      fetch(\"http://127.0.0.1:3083/screen\").then(r => r.text()).then(t => { console.log(t); })\n" +
+                "      fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/screen\").then(r => r.text()).then(t => { console.log(t); })\n" +
                 "        .catch(e => { console.error(\"scr: \" + e.message); process.exit(2); });\n" +
                 "    ' ;;\n" +
                 "  tap)\n" +
                 "    exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
                 "      const body = JSON.stringify({ x: Number(process.argv[1]), y: Number(process.argv[2]) });\n" +
-                "      fetch(\"http://127.0.0.1:3083/tap\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
+                "      fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/tap\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
                 "        .then(r => { console.log(r.ok ? \"tapped\" : \"tap failed\"); process.exit(r.ok ? 0 : 1); })\n" +
                 "        .catch(e => { console.error(\"scr: \" + e.message); process.exit(2); });\n" +
                 "    ' -- \"${'$'}2\" \"${'$'}3\" ;;\n" +
                 "  tap-text)\n" +
                 "    exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
                 "      const body = JSON.stringify({ text: process.argv[1] });\n" +
-                "      fetch(\"http://127.0.0.1:3083/tap\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
+                "      fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/tap\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
                 "        .then(r => { console.log(r.ok ? \"tapped\" : \"text not found\"); process.exit(r.ok ? 0 : 1); })\n" +
                 "        .catch(e => { console.error(\"scr: \" + e.message); process.exit(2); });\n" +
                 "    ' -- \"${'$'}2\" ;;\n" +
@@ -322,7 +337,7 @@ object EngineConfig {
                 "done\n")
             killx.setExecutable(true, false)
 
-            Log.i(TAG, "agent gates: notify/scr/curl/psx/killx wrappers injected (bridge :3083)")
+            Log.i(TAG, "agent gates: notify/scr/curl/psx/killx wrappers injected (bridge :$AGENT_BRIDGE_PORT)")
         } catch (e: Exception) {
             Log.w(TAG, "agent gates: ${e.message}")
         }

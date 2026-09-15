@@ -34,7 +34,7 @@ import java.nio.charset.StandardCharsets
 object AgentBridge {
 
     private const val TAG = "AgentBridge"
-    const val PORT = 3083
+    const val PORT = EngineConfig.AGENT_BRIDGE_PORT
     private const val CHANNEL_ID = "agent_notify"
 
     @Volatile private var server: ServerSocket? = null
@@ -172,9 +172,9 @@ object AgentBridge {
             if (f.isFile) f.readText().takeLast(2500) else "(no engine.log)"
         }.getOrDefault("(log read failed)")
 
-        // 3080 HTTP 探测
+        // 引擎 HTTP 探测（端口跟随 EngineConfig.DEFAULT_PORT）
         val httpProbe = runCatching {
-            val c = (java.net.URL("http://127.0.0.1:3080/").openConnection()
+            val c = (java.net.URL("http://127.0.0.1:${EngineConfig.DEFAULT_PORT}/").openConnection()
                     as java.net.HttpURLConnection).apply { connectTimeout = 4000; readTimeout = 4000 }
             val code = c.responseCode
             // readNBytes(int) 是 API 33+；Android 11 上会 NoSuchMethod——用 Kotlin readBytes 截断
@@ -187,10 +187,10 @@ object AgentBridge {
         val crlf = "\r\n"
         val wsProbe = listOf("/ws", "/", "/api/ws", "/socket").joinToString("<br>") { p ->
             runCatching {
-                java.net.Socket("127.0.0.1", 3080).use { sock ->
+                java.net.Socket("127.0.0.1", EngineConfig.DEFAULT_PORT).use { sock ->
                     sock.soTimeout = 4000
                     val req = "GET $p HTTP/1.1" + crlf +
-                        "Host: 127.0.0.1:3080" + crlf +
+                        "Host: 127.0.0.1:${EngineConfig.DEFAULT_PORT}" + crlf +
                         "Upgrade: websocket" + crlf +
                         "Connection: Upgrade" + crlf +
                         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" + crlf +
@@ -209,7 +209,7 @@ object AgentBridge {
 <h3>1. WebView UA</h3><pre id="ua"></pre>
 <h3>2. JS API 检测（false=缺失）</h3><pre id="api"></pre>
 <h3>3. 引擎状态</h3><pre>$engineState</pre>
-<h3>4. 3080 HTTP 探测</h3><pre>$httpProbe</pre>
+<h3>4. 引擎 HTTP 探测 (${EngineConfig.DEFAULT_PORT})</h3><pre>$httpProbe</pre>
 <h3>5. WebSocket 探测</h3><pre>$wsProbe</pre>
 <h3>6. runtime 版本</h3><pre>$runtimeVer</pre>
 <h3>7. 前端 polyfill</h3><pre>$poly</pre>
