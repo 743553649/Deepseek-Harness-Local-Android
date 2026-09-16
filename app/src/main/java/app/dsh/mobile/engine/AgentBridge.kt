@@ -10,8 +10,8 @@ import android.util.Log
 import app.dsh.mobile.DshAccessibilityService
 import app.dsh.mobile.R
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
@@ -71,30 +71,16 @@ object AgentBridge {
         Thread({
             try {
                 client.soTimeout = 5_000
-                val reader = BufferedReader(InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8))
-                val requestLine = reader.readLine() ?: return@Thread
-                val parts = requestLine.split(" ")
+                val input = client.getInputStream()
+                val head = readHead(input) ?: return@Thread
+                val lines = head.split("\r\n")
+                val parts = lines[0].split(" ")
                 if (parts.size < 2) return@Thread
                 val method = parts[0]; val path = parts[1]
-                // headers 读完
-                var line = reader.readLine()
-                var contentLength = 0
-                while (line != null && line.isNotEmpty()) {
-                    if (line.startsWith("Content-Length:", ignoreCase = true)) {
-                        contentLength = line.substringAfter(":").trim().toIntOrNull() ?: 0
-                    }
-                    line = reader.readLine()
-                }
-                val body = if (contentLength > 0) {
-                    val buf = CharArray(contentLength)
-                    var n = 0
-                    while (n < contentLength) {
-                        val r = reader.read(buf, n, contentLength - n)
-                        if (r < 0) break
-                        n += r
-                    }
-                    String(buf, 0, n)
-                } else ""
+                val contentLength = lines.drop(1)
+                    .firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+                    ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
+                val body = readBody(input, contentLength)
 
                 val (status, json) = route(ctx, method, path, body)
                 respond(client, status, json)
@@ -105,6 +91,43 @@ object AgentBridge {
                 runCatching { client.close() }
             }
         }, "AgentBridge-req").apply { isDaemon = true; start() }
+    }
+
+    /**
+     * 逐字节读到请求头结束（`\r\n\r\n`）。
+     *
+     * 这里**刻意不用 `BufferedReader`**：它是字符流且会预读，body 会被提前吞进它的字符缓冲区，
+     * 之后就再也无法按「字节数」准确读 body。详见 `docs/PITFALLS.md` G12。
+     */
+    private fun readHead(input: InputStream): String? {
+        val out = ByteArrayOutputStream()
+        val tail = StringBuilder() // 只保留最近 4 个字节，用于匹配 \r\n\r\n
+        while (true) {
+            val b = input.read()
+            if (b < 0) return null
+            out.write(b)
+            tail.append(b.toChar())
+            if (tail.length > 4) tail.deleteCharAt(0)
+            if (tail.length == 4 && tail.toString() == "\r\n\r\n") {
+                return String(out.toByteArray(), StandardCharsets.UTF_8)
+            }
+        }
+    }
+
+    /**
+     * 按**字节**读请求体：`Content-Length` 的单位是字节，而 body 常含 UTF-8 中文（字符数 < 字节数）。
+     * 按字符数去读会永远读不满 → 阻塞到 soTimeout → 500 `Read timed out`（G12）。
+     */
+    private fun readBody(input: InputStream, contentLength: Int): String {
+        if (contentLength <= 0) return ""
+        val buf = ByteArray(contentLength)
+        var n = 0
+        while (n < contentLength) {
+            val r = input.read(buf, n, contentLength - n)
+            if (r < 0) break
+            n += r
+        }
+        return String(buf, 0, n, StandardCharsets.UTF_8)
     }
 
     private fun route(ctx: Context, method: String, path: String, body: String): Pair<Int, String> {

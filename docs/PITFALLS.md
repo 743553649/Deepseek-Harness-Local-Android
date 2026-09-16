@@ -469,3 +469,42 @@
   一旦渲染函数里混入了环境相关值，只比版本号的幂等检查就会退化为"永远不更新"。
   设计这类"受管文件"时，先分清**静态模板**（版本号触发）与**动态字段**（每次同步）。
 
+### G12. ★★`notify` 发中文消息必然失败：`Content-Length` 是字节，却被当字符读
+
+- **现象**：AI 调 `notify "中文消息"` 必失败 —— HTTP **500** + `{"ok":false,"error":"Read timed out"}`，
+  且固定卡 **5 秒**（正好是 `AgentBridge.handle()` 的 `client.soTimeout = 5_000`）。
+  因为 seed 里就要求 AI「长任务结束用 `notify` 告知」，而 AI 写的消息**总是中文**
+  → **这个功能在真机上从未成功过**（失败是静默的，只看退出码 1）。
+- **根因**：`handle()` 用 `BufferedReader`（**字符**流）读请求体，却拿 `Content-Length`（**字节**数）
+  当**字符数**：
+  ```kotlin
+  val buf = CharArray(contentLength)              // contentLength 是字节数
+  while (n < contentLength) { ... reader.read(...) }   // 却想读这么多「字符」
+  ```
+  UTF-8 中文一个字 3 字节 → **实际字符数 < 声明的字节数** → 循环永远读不满 →
+  阻塞到 `soTimeout` → `SocketTimeoutException("Read timed out")`。
+- **决定性证据**（同一端点，只差是否含多字节字符）：
+  | body | Content-Length | 实际字符数 | 结果 |
+  |---|---|---|---|
+  | 纯 ASCII | 45 | 45 | **200 `{"ok":true}`**（71ms）|
+  | 含中文 | 44 | 32 | 500 `Read timed out`（5019ms）|
+  | 单个汉字 | 27 | 25 | 500 `Read timed out`（5024ms）|
+  对照：`/ext/install` 的 body 是**纯 ASCII** JSON → 7ms 正常返回，所以这个坑只在
+  「body 含非 ASCII」时暴露，容易长期潜伏。
+- **归属**：fork 继承的**老 bug**，**不是 0.1.5 升级引入** —— 官方版（引擎 0.1.1）实测同一错误，
+  且 `AgentBridge.kt` 在本次升级中只改了端口常量，body 读取那段一个字没动。
+- **修法**：请求侧也按**字节**处理 ——
+  1. header 改为**逐字节**读到 `\r\n\r\n`（HTTP 头是 ASCII，安全）；
+  2. body 按 `contentLength` **字节**读满，再整体 UTF-8 解码。
+  ⚠️ **不能"用 BufferedReader 读 header + 用底层 InputStream 读 body"**：`BufferedReader`
+  会预读，body 的一部分已被吞进它的字符缓冲区，这样读会错位 —— 所以必须连 header 一起改成字节读。
+  （响应侧 `respond()` 本来就用 `bytes.size`，是对的。）
+- **验证**：
+  1. 本地用 JS 精确复刻新逻辑，喂真实 HTTP 请求字节流跑 8 个用例 ——
+     中文 / emoji(4 字节) / 单汉字 / 小写 `content-length` / 多 header / 空 body 全部正确，
+     且**读完后无残留字节**（证明字节数精确匹配）；
+  2. 真机：发中文 body 的 `POST /notify` 应返回 **200 `{"ok":true}`**，并能在
+     `dumpsys notification` 里看到 `app.dsh.mobile.dev` 的通知（渠道 `agent_notify`）。
+- **通用教训**：**`Content-Length` 永远是字节数。** 只要中间经过 `Reader`/`Writer` 这类**字符**
+  抽象，就必须自己做字节↔字符的换算，否则"英文测试全过、中文必挂"——这类 bug 的隐蔽性极高。
+
