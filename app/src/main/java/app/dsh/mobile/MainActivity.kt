@@ -88,8 +88,9 @@ class MainActivity : Activity() {
         }
         // 预览模式返回：一键从 AI 起的服务页回引擎主界面
         findViewById<TextView>(R.id.btnBack).setOnClickListener {
-            val port = (application as DshApp).supervisor.healthyPort
-            loadLocalUrl("http://127.0.0.1:$port/")
+            // 0.1.5+：优先用引擎宣布的带 token 入口（会话 cookie 可能已过期，重走 token 链换新）
+            val sup = (application as DshApp).supervisor
+            loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
         }
         // 工具栏收起/唤回：点横栏文字空白区收起（网页全屏）
         statusBar.setOnClickListener { toggleToolbar() }
@@ -311,14 +312,16 @@ class MainActivity : Activity() {
             is EngineSupervisor.State.Healthy -> {
                 if (!urlLoaded) {
                     urlLoaded = true
-                    loadLocalUrl("http://127.0.0.1:${state.port}/")
+                    // 0.1.5+ WebUI 强制会话认证：裸 / 是 401 黑屏；必须用引擎打印的
+                    // 带 token 入口（WebView 跟随 303 自动种 cookie）。旧引擎无 token 退回裸 URL。
+                    loadLocalUrl(state.webUrl ?: "http://127.0.0.1:${state.port}/")
                 }
                 getString(R.string.status_healthy)
             }
             is EngineSupervisor.State.SafeMode -> {
                 if (!urlLoaded) {
                     urlLoaded = true
-                    loadLocalUrl("http://127.0.0.1:${state.port}/")
+                    loadLocalUrl(state.webUrl ?: "http://127.0.0.1:${state.port}/")
                 }
                 getString(R.string.status_safe_mode)
             }

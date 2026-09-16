@@ -375,15 +375,18 @@
   - 认证参数名是 `token`（`TOKEN_QUERY = "token"`）
   - ⚠️ **健康检查不受影响**：裸 `/` 返回 401 也算"有响应"，所以 `EngineSupervisor`
     依旧判定 healthy —— 又一次"假已就绪"。
-- **修法（App 侧，尚无定论）**：需要让 WebView 加载**带 token 的 URL**（浏览器会自动
-  跟随 303 并保存 cookie）。可选路径：
-  1. 从引擎 stdout 解析 `dsh web: <url>` 行取完整 URL（`EngineProcess` 的日志泵已读到该输出，
-     在 `EngineSupervisor` 里提取即可），`MainActivity` 用它加载；
-  2. 或找到上游关闭/放宽认证的配置项（本次未找到）。
+- **修法（已实施，v1.2.26）**：三处改动 ——
+  1. `EngineProcess`：日志泵逐行扫描 stdout 的 `dsh web: <url>` 行（带行缓冲防 chunk 截断），
+     捕获到 `webUrlFuture`；
+  2. `EngineSupervisor`：`State.Healthy/SafeMode` 增加 `webUrl` 字段；健康检查通过后
+     等 token 行最多 15s（进程死则立即放弃），随状态发布；
+  3. `MainActivity`：三处 WebView 加载点全部 `webUrl ?: 裸URL`（旧引擎/捕获失败退回原行为）。
+  兼容性：0.1.1 引擎打印的行不带 token，同一通路捕获后等价于现状，不会变差。
 - **排查时容易自误的坑**：用 `fetch()` 测"带 token 的 URL"会得到 **401**，
   因为 Node 的 `fetch` 默认 `redirect:"follow"` 却**不保存 cookie** → 跟随后的请求没 cookie。
   必须用 `redirect: "manual"` 看 303，或用真实浏览器/WebView 测。
-- **验证**：`fetch(url, {redirect:"manual"})` → `status=303`、`set-cookie` 存在、`location=/`。
+- **验证**：`fetch(url, {redirect:"manual"})` → `status=303`、`set-cookie` 存在、`location=/`；
+  带 cookie 再 GET `/` → `200` + 27724 字节 HTML（真机 0.1.5 实测）。
 
 ### G9. 「以 root 身份手动跑引擎」会污染 app 的 dsh-home（域/属主双重坑）
 
@@ -403,4 +406,23 @@
 - **附带教训**：**不要用 `pkill -f <模式>` / `ps | grep <命令行>` 再 kill** —— 自己的
   命令行里就含那个模式，会**杀掉自己**（本次实测：整条命令被 SIGTERM，无任何输出）。
   按端口定位再 kill 才安全（`ss -ltnp | awk '/:<port>/'`）。
+
+### G10. ★★MANIFEST version 无内容指纹：同日构建撞号 → 覆盖安装永远不重装 runtime
+
+- **现象（真机，2026-09-16）**：koffi 修复已确认进 APK（`runtime.zip` 里的新桩逐字节核对过），
+  `pm install -r` 也返回 Success，但设备引擎**仍按旧桩崩溃循环**（`engine.log` 里
+  STARTUPINFOW 报错涨到 26 次、18 次重启）—— **修复根本没有落地**。
+- **根因**：CI 给 `MANIFEST.json` 写的 version 是 `"分支-日期"`（如
+  `experiment/dsh-0.1.5-rc.1-20260916`），**不含 runtime 内容指纹**。而
+  `RuntimeInstaller.ensureInstalled()` 的闸门是「`.runtime-version` 戳 == MANIFEST.version
+  且资产完整 → 跳过重装」。同一天内推送多个构建 → version 相同 → 覆盖安装后闸门判定
+  "版本没变" → **跳过解压，设备上还是旧 runtime**。
+  讽刺的是：CI 明明算出了 `runtime.zip` 的 SHA-256，却只写进远程校验字段（`.sha256`），
+  没进 version。
+- **修法（已实施）**：version 改为 `"分支-日期-<sha256 前 12 位>"` ——
+  runtime 内容变一个字节，指纹就变，闸门必然触发重装。
+- **验证**：装机后 `grep -c layoutStruct .../node_modules/koffi/index.js` 应 > 0
+  （新桩落地的直接证据）。
+- **通用教训**：**凡"内容更新但版本戳不变"的发布链路，都会把修复静默吞掉。**
+  版本戳必须由内容派生（或至少含单调递增的构建序号），"分支-日期"粒度不够。
 

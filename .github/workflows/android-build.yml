@@ -122,7 +122,11 @@ jobs:
       - name: 回填 MANIFEST 版本与校验值
         run: |
           SHA=$(sha256sum app/src/main/assets/runtime.zip | cut -d' ' -f1)
-          VER="${GITHUB_REF_NAME:-dev}-$(date +%Y%m%d)"
+          # version 必须含 runtime 内容指纹：安装器以 version 为闸门决定是否重装，
+          # 同日多次构建若只写"分支-日期"会撞号 → 覆盖安装时判定"版本相同+资产完整"
+          # → 跳过重装 → 构建里的 runtime 修复永远无法落地（实测事故 2026-09-16：
+          # koffi 修复已进 APK，设备上却仍是旧桩，引擎崩溃循环 18 次）。
+          VER="${GITHUB_REF_NAME:-dev}-$(date +%Y%m%d)-${SHA::12}"
           jq --arg sha "$SHA" --arg ver "$VER" \
             '.version=$ver | .sha256=$sha' \
             app/src/main/assets/runtime/MANIFEST.json > /tmp/m.json

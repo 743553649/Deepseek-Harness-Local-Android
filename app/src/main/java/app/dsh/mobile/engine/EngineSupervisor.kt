@@ -34,11 +34,11 @@ class EngineSupervisor(private val ctx: Context) {
         data object Installing : State
         data object Starting : State
 
-        /** 正常健康 */
-        data class Healthy(val port: Int) : State
+        /** 正常健康。webUrl = 引擎宣布的带认证 token 的 WebUI 入口（0.1.5+；旧引擎/未宣布为 null） */
+        data class Healthy(val port: Int, val webUrl: String? = null) : State
 
         /** 安全模式：配置被隔离后以空配置拉起，功能受限但可用 */
-        data class SafeMode(val port: Int) : State
+        data class SafeMode(val port: Int, val webUrl: String? = null) : State
         data class Backoff(val delayMs: Long, val attempt: Int) : State
         data class Failed(val reason: String) : State
         data object Stopped : State
@@ -56,6 +56,17 @@ class EngineSupervisor(private val ctx: Context) {
         is State.Healthy -> s.port
         is State.SafeMode -> s.port
         else -> EngineConfig.DEFAULT_PORT
+    }
+
+    /**
+     * 当前健康引擎宣布的 WebUI 入口（含认证 token）。
+     * 0.1.5 起 WebUI 强制会话认证：WebView 必须用它加载（303 种 cookie），
+     * 用裸 `/` 只会得到 401 黑屏。null = 旧引擎或未宣布，退回裸 URL。
+     */
+    val healthyWebUrl: String? get() = when (val s = _state.value) {
+        is State.Healthy -> s.webUrl
+        is State.SafeMode -> s.webUrl
+        else -> null
     }
 
     private var process: EngineProcess? = null
@@ -167,10 +178,14 @@ class EngineSupervisor(private val ctx: Context) {
                     }
                     backoffIndex = 0
                     val safe = guardian.inSafeMode()
+                    // 0.1.5+：HTTP 监听先于 WebUI 就绪（裸 / 也能应答 401，健康检查
+                    // 探到即过），带 token 的入口行要等插件树加载完才打印 ——
+                    // 此处稍作等待拿它，拿不到（旧引擎/进程死）退回裸 URL。
+                    val webUrl = awaitWebUrl(proc)
                     Log.i(TAG, if (safe) "engine healthy in SAFE MODE on :${EngineConfig.DEFAULT_PORT}" else "engine healthy on :${EngineConfig.DEFAULT_PORT}")
                     _state.value =
-                        if (safe) State.SafeMode(EngineConfig.DEFAULT_PORT)
-                        else State.Healthy(EngineConfig.DEFAULT_PORT)
+                        if (safe) State.SafeMode(EngineConfig.DEFAULT_PORT, webUrl)
+                        else State.Healthy(EngineConfig.DEFAULT_PORT, webUrl)
                     // Shizuku 模式：引擎就绪后启动 ADB 级访问桥（shz 包装器回呼用）；其他模式自动关停
                     withContext(Dispatchers.IO) {
                         ShizukuHttpBridge.start(ctx, EngineConfig.DEFAULT_PORT)
@@ -307,7 +322,27 @@ class EngineSupervisor(private val ctx: Context) {
         false
     }
 
+    /**
+     * 等待引擎宣布 WebUI 入口（`dsh web: <url>` 行）。
+     * 健康检查探到端口时该行往往尚未打印（HTTP 服务器先于插件树就绪），
+     * 等一小窗即可。进程提前死亡立即放弃（进入退避重试，等也白等）。
+     * @return 带 token 的入口 URL；超时/旧引擎返回 null（调用方退回裸 URL，行为同旧版）
+     */
+    private suspend fun awaitWebUrl(proc: EngineProcess): String? {
+        val deadline = System.currentTimeMillis() + WEB_URL_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline &&
+            !proc.webUrlFuture.isDone && !proc.exitFuture.isDone &&
+            kotlinx.coroutines.currentCoroutineContext().isActive
+        ) {
+            delay(200)
+        }
+        return proc.webUrlFuture.takeIf { it.isDone }?.get()
+    }
+
     companion object {
         private const val TAG = "EngineSupervisor"
+
+        /** 引擎打印 "dsh web: <url>" 与健康检查通过之间的最大等待窗 */
+        private const val WEB_URL_TIMEOUT_MS = 15_000L
     }
 }

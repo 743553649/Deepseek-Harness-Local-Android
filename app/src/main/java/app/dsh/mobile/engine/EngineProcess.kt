@@ -22,6 +22,17 @@ class EngineProcess private constructor(
     private val closed = AtomicBoolean(false)
     val exitFuture = CompletableFuture<Int>()
 
+    /**
+     * 引擎宣布的 WebUI 入口（stdout 行 `dsh web: http://...`），由日志泵捕获。
+     *
+     * dsh 0.1.5 起 WebUI 强制浏览器会话认证：裸 `/` 一律 401（正文
+     * "dsh web authentication required"）。引擎打印的这个 URL 携带进程
+     * launch token —— WebView 用它加载，引擎 303 重定向并种下签名 cookie，
+     * 之后才放行。旧引擎（0.1.1）打印同行但无 token，同样适用本通路。
+     * 未打印（崩溃/超时）则永不完成，调用方退回裸 URL。
+     */
+    val webUrlFuture = CompletableFuture<String>()
+
     /** PTY 跟踪的子进程 PID（su -c 模式下是 su 外壳；真正 node 在其子进程组） */
     val pid: Int get() = Pty.nativeChildPid()
 
@@ -49,11 +60,13 @@ class EngineProcess private constructor(
             }).use { input ->
                 logFile.appendText("---- engine start ${System.currentTimeMillis()} ----\n")
                 val buf = ByteArray(4096)
+                val lineBuf = StringBuilder()
                 while (!closed.get()) {
                     val n = input.read(buf)
                     if (n < 0) break
                     if (n > 0) {
                         val chunk = String(buf, 0, n, Charsets.UTF_8)
+                        scanForWebUrl(lineBuf, chunk)
                         Log.d(TAG, chunk.trim())
                         if (logFile.length() < maxLogBytes) {
                             logFile.appendText(chunk)
@@ -68,6 +81,24 @@ class EngineProcess private constructor(
         } catch (e: IOException) {
             if (!closed.get()) Log.w(TAG, "log pump ended: ${e.message}")
         }
+    }
+
+    /**
+     * 从 stdout 流里逐行扫描 `dsh web: <url>`。chunk 可能在一行中间截断，
+     * 故维护行缓冲：遇到 \n 才把完整行交给正则。complete 天然幂等（首个生效），
+     * 引擎重启打印多行也安全。URL 全为 ASCII，不受 UTF-8 截断影响。
+     */
+    private fun scanForWebUrl(buf: StringBuilder, chunk: String) {
+        buf.append(chunk)
+        while (true) {
+            val nl = buf.indexOf('\n')
+            if (nl < 0) break
+            val line = buf.substring(0, nl)
+            buf.delete(0, nl + 1)
+            WEB_URL_LINE.find(line)?.let { webUrlFuture.complete(it.groupValues[1]) }
+        }
+        // 病态输出（超长无换行）防护：目标行不过几百字节，超限即弃
+        if (buf.length > 8_192) buf.setLength(0)
     }
 
     /** 优雅停止：TERM → 10s 宽限 → KILL */
@@ -96,6 +127,9 @@ class EngineProcess private constructor(
 
     companion object {
         private const val TAG = "EngineProcess"
+
+        /** stdout 里 WebUI 入口行的形状：`dsh web: http://127.0.0.1:PORT/?token=...` */
+        private val WEB_URL_LINE = Regex("""dsh web: (\S+)""")
 
         /**
          * fork 引擎进程。
