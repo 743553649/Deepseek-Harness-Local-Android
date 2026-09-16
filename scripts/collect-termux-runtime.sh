@@ -131,15 +131,65 @@ if command -v python3 >/dev/null 2>&1; then
   python3 "$SCRIPTS_DIR/patch-webview-polyfill.py" "$NM" || echo "WARN: webview polyfill patch failed"
 fi
 
-# [koffi] FFI 库：仅 glibc/x64 预编译。真实消费方只有 dsh-subprocess-local 的
-# Win32 进程树强杀（Android 死代码），但其类型注册在模块顶层执行必须不抛错。
+# [koffi] FFI 库：仅 glibc/x64 预编译，Android 无法加载。
+#
+# 历史上"惰性 Proxy 桩"就够用：上游只在模块顶层做类型注册，真实调用都发生在
+# Windows 死代码里。**0.1.5 打破了这个前提**：上游新增 @deepseek-ai/dsh-win32-process，
+# 它在【模块顶层】用 koffi 建 struct 并做 ABI 自检
+# （STARTUPINFOW.size === 104、PROCESS_INFORMATION.size === 24），而该包被
+# @deepseek-ai/dsh-subprocess-local 【静态 import】→ Android 上加载即执行
+# → 惰性桩的 .size 是个函数 → 自检抛错：
+#   STARTUPINFOW layout mismatch: koffi computed function () { return inertProxy(name); }, expected 104
+#   → plugin tree failed to load → 引擎启动即崩。
+#   真机症状极具迷惑性：HTTP 服务器先起来（前端短暂显示"引擎已就绪"），随后进程退出
+#   → 网页打不开。详见 docs/PITFALLS.md G7。
+#
+# 所以桩必须能【真算出】LP64 布局。Windows x64 与 Android arm64 同为 LP64
+# （指针 8 字节、8 字节对齐），算出的值与上游期望值真实一致 —— 这是真通过，
+# 不是把校验绕过去（下面有 CI 自检，值不符就硬失败）。
+# win32 路径在 Android 上仍是死代码；其余 FFI API 一律保持惰性。
 K="$NM/koffi"
 test -e "$K.orig" || mv "$K" "$K.orig"
 mkdir -p "$K"
 printf '%s\n' '{"name":"koffi","version":"0.0.0-android-inert","main":"index.js"}' > "$K/package.json"
 cat > "$K/index.js" <<'JSEOF'
-// Android inert koffi: type REGISTRATION must not throw (win32-only helpers
-// run it at module top level). Real FFI calls never happen on Android.
+// Android inert koffi + 最小 LP64 布局计算。
+// 惰性 Proxy 只保证"不抛错"，但上游 dsh-win32-process 在模块顶层校验 struct 的
+// ABI 布局（STARTUPINFOW=104 / PROCESS_INFORMATION=24），惰性 Proxy 的 .size 是
+// 函数，会让校验抛错。这里补上真实布局计算；真实 FFI 调用在 Android 上永不发生。
+const PTR = 8;
+const PRIM = {
+  void: 0, bool: 1, char: 1, int8: 1, uint8: 1, uchar: 1,
+  short: 2, int16: 2, uint16: 2, ushort: 2,
+  int: 4, int32: 4, uint32: 4, uint: 4, long: 4, ulong: 4, float: 4,
+  int64: 8, uint64: 8, longlong: 8, ulonglong: 8, double: 8, size_t: 8,
+  str: 8, str16: 8, string: 8,
+};
+function sizeOfType(t) {
+  if (typeof t === "string") {
+    const s = PRIM[t];
+    if (s === undefined) return { size: PTR, align: PTR };
+    return { size: s, align: Math.min(Math.max(s, 1), PTR) };
+  }
+  if (Array.isArray(t)) {
+    const e = sizeOfType(t[0]);
+    return { size: e.size * (Number(t[1]) || 0), align: e.align };
+  }
+  if (t !== null && typeof t === "object" && typeof t.__size === "number") {
+    return { size: t.__size, align: t.__align || PTR };
+  }
+  return { size: PTR, align: PTR };
+}
+function layoutStruct(fields) {
+  let off = 0, maxAlign = 1;
+  for (const t of Object.values(fields)) {
+    const { size, align } = sizeOfType(t);
+    const a = Math.max(align, 1);
+    if (a > maxAlign) maxAlign = a;
+    off = Math.ceil(off / a) * a + size;
+  }
+  return { size: Math.ceil(off / maxAlign) * maxAlign, align: maxAlign };
+}
 function makeInert(name) {
   const fn = function () { return inertProxy(name); };
   return fn;
@@ -156,9 +206,80 @@ function inertProxy(tag) {
     apply() { return inertProxy(tag); },
   });
 }
-module.exports = inertProxy("koffi");
+function typeObject(tag, size, align) {
+  const real = { __size: size, __align: align, size, alignment: align, name: tag };
+  return new Proxy(real, {
+    get(t, p) {
+      if (Object.prototype.hasOwnProperty.call(t, p)) return t[p];
+      if (p === "__esModule") return false;
+      if (p === "then") return undefined;
+      return makeInert(tag + "." + String(p));
+    },
+  });
+}
+const real = {
+  pointer: function () { return typeObject("pointer", PTR, PTR); },
+  struct: function (name, fields) {
+    const l = layoutStruct(fields || {});
+    return typeObject(name, l.size, l.align);
+  },
+  array: function (t, n) {
+    const e = sizeOfType(t);
+    return typeObject("array", e.size * (Number(n) || 0), e.align);
+  },
+  alias: function (name, t) {
+    const e = sizeOfType(t);
+    return typeObject(name, e.size, e.align);
+  },
+  sizeof: function (t) { return sizeOfType(t).size; },
+  alignof: function (t) { return sizeOfType(t).align; },
+};
+module.exports = new Proxy(makeInert("koffi"), {
+  get(t, p) {
+    if (Object.prototype.hasOwnProperty.call(real, p)) return real[p];
+    if (p === "__esModule") return false;
+    if (p === "then") return undefined;
+    if (!t[p]) t[p] = makeInert("koffi." + String(p));
+    return t[p];
+  },
+  construct() { return {}; },
+  apply() { return inertProxy("koffi"); },
+});
 module.exports.default = module.exports;
 JSEOF
+
+# ---- koffi 桩的 ABI 布局自检（决定性；纯 JS，与平台无关，可在 x86_64 runner 上验）----
+# 值必须等于上游 dsh-win32-process 的顶层期望值，否则真机启动即崩。
+node -e '
+const koffi = require(process.argv[1]);
+const PVOID = koffi.pointer("void");
+const SI = koffi.struct("DSH_STARTUPINFOW", {
+  cb: "uint32", lpReserved: "str16", lpDesktop: "str16", lpTitle: "str16",
+  dwX: "uint32", dwY: "uint32", dwXSize: "uint32", dwYSize: "uint32",
+  dwXCountChars: "uint32", dwYCountChars: "uint32", dwFillAttribute: "uint32",
+  dwFlags: "uint32", wShowWindow: "uint16", cbReserved2: "uint16",
+  lpReserved2: koffi.pointer("uint8"), hStdInput: PVOID, hStdOutput: PVOID, hStdError: PVOID
+});
+const PI = koffi.struct("DSH_PROCESS_INFORMATION", {
+  hProcess: PVOID, hThread: PVOID, dwProcessId: "uint32", dwThreadId: "uint32"
+});
+if (SI.size !== 104) { console.error("koffi 桩 ABI 错误: STARTUPINFOW.size=" + SI.size + ", 应为 104"); process.exit(1); }
+if (PI.size !== 24) { console.error("koffi 桩 ABI 错误: PROCESS_INFORMATION.size=" + PI.size + ", 应为 24"); process.exit(1); }
+console.log("koffi 桩 ABI 自检通过: STARTUPINFOW=" + SI.size + ", PROCESS_INFORMATION=" + PI.size);
+' "$K" || exit 1
+
+# 更强的一步：真把 dsh-win32-process 导入一次。它被 dsh-subprocess-local 静态 import，
+# 导入失败就等于 Android 上引擎启动即崩 —— 这条断言直接在构建期挡住 G7 复发。
+node --input-type=module -e '
+const { pathToFileURL } = await import("node:url");
+try {
+  const m = await import(pathToFileURL(process.argv[1]).href);
+  console.log("dsh-win32-process 导入成功，导出 " + Object.keys(m).length + " 个符号");
+} catch (e) {
+  console.error("dsh-win32-process 导入失败（真机会启动即崩）: " + e.message);
+  process.exit(1);
+}
+' "$NM/@deepseek-ai/dsh-win32-process/lib/index.js" || exit 1
 
 # [node-pty] 缺 android 平台 .node 预编译。App 层已有自研 libdshpty.so，
 # M2 将桥接；在此桥接前提供 API 兼容空壳，真实调用时显式报错。

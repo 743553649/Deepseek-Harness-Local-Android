@@ -329,3 +329,78 @@
 - **遗留状态**：仓库历史结论（app 域下 `link()` → EACCES）**既未被证实也未被证伪**，
   升级时按保守做法保留 rename 替代。
 
+### G7. ★★0.1.5 的顶层 ABI 自检 vs koffi 惰性桩 —— 引擎"假已就绪"然后死掉
+
+- **现象（真机，2026-09-16）**：装上新 APK 后前端显示**「引擎已就绪」**，但**网页打不开**。
+  `engine.log` 里连排多行 `---- engine start ----`，**后面却没有任何输出**。
+- **根因**：上游 0.1.5 新增 `@deepseek-ai/dsh-win32-process`，它在**模块顶层**用 koffi
+  建 struct 并做 ABI 自检：
+
+  ```js
+  const STARTUPINFOW = koffi.struct("DSH_STARTUPINFOW", { cb: "uint32", ... });
+  if (STARTUPINFOW.size !== 104) throw new Error(`STARTUPINFOW layout mismatch: ...`);
+  if (PROCESS_INFORMATION.size !== 24) throw new Error(`PROCESS_INFORMATION layout mismatch: ...`);
+  ```
+
+  而它被 `@deepseek-ai/dsh-subprocess-local` **静态 import** → Android 上加载即执行。
+  仓库原来的 koffi 桩是**纯惰性 Proxy**：`koffi.struct()` 返回 Proxy，`.size` 取到的是
+  一个**函数**（`function () { return inertProxy(name); }`）→ 自检必然抛错：
+  `STARTUPINFOW layout mismatch: koffi computed function () { return inertProxy(name); }, expected 104`
+  → `plugin tree failed to load` → 引擎退出。
+- **为什么症状是"假已就绪"**：HTTP 服务器**先于**插件树加载完成就监听了。健康检查
+  （`GET /` 只要有响应就算通过）探到了端口 → 前端显示"已就绪"；随后插件树加载失败、
+  进程退出 → 网页 404/连不上。**这正好是 AGENTS.md「构建成功≠能用」的又一例。**
+- **修法**：让 koffi 桩**真算 LP64 布局**（而非只做惰性代理）。Windows x64 与
+  Android arm64 **同为 LP64**（指针 8 字节、8 字节对齐），所以算出的 104 / 24 与上游
+  期望值**真实一致** —— 这是真通过，不是把校验绕过去。
+  好处：**完全不碰上游源码**（比逐个外科手术更耐上游改版）。
+- **验证**：
+  1. CI 内布局自检（纯 JS、与平台无关）：`STARTUPINFOW.size === 104` 且 `PROCESS_INFORMATION.size === 24`；
+  2. CI 内**真导入** `dsh-win32-process` 一次，导入失败即硬失败（挡住复发）；
+  3. 真机实测：替换桩后 `import("@deepseek-ai/dsh-win32-process")` 成功（21 个符号），
+     手动跑引擎输出 `dsh web: http://127.0.0.1:3199/?token=...`、**零报错**、端口正常监听。
+- **通用教训**：**「惰性 Proxy 桩」只能保证"调用不抛错"，挡不住上游把"求值结果"用于
+  自检**。上游每次新增顶层自检/布局校验，惰性桩都可能翻车。审计方法：全树扫描
+  `^koffi\.` 这类**行首无缩进**的顶层调用，以及顶层 `if (... .size !== N) throw`。
+
+### G8. ★0.1.5 新增 WebUI token 认证：App 加载裸 `/` 会 401
+
+- **现象**：引擎明明起来了（端口在监听、日志零报错），WebView 仍然打不开页面。
+- **根因**：0.1.5 引入浏览器会话认证（`@deepseek-ai/dsh-client-connection` 的
+  `BrowserAuth`）。规则：
+  - 引擎启动时打印带进程 token 的 URL：`dsh web: http://127.0.0.1:<port>/?token=<43 字符>`
+  - 用这个 URL 访问 → **303 重定向到 `/` + `set-cookie`（签名 cookie，绑定 Host authority）**
+  - 之后带该 cookie 才放行；否则一律 **401** + 正文
+    `dsh web authentication required; reopen the URL printed by dsh web.`
+  - 认证参数名是 `token`（`TOKEN_QUERY = "token"`）
+  - ⚠️ **健康检查不受影响**：裸 `/` 返回 401 也算"有响应"，所以 `EngineSupervisor`
+    依旧判定 healthy —— 又一次"假已就绪"。
+- **修法（App 侧，尚无定论）**：需要让 WebView 加载**带 token 的 URL**（浏览器会自动
+  跟随 303 并保存 cookie）。可选路径：
+  1. 从引擎 stdout 解析 `dsh web: <url>` 行取完整 URL（`EngineProcess` 的日志泵已读到该输出，
+     在 `EngineSupervisor` 里提取即可），`MainActivity` 用它加载；
+  2. 或找到上游关闭/放宽认证的配置项（本次未找到）。
+- **排查时容易自误的坑**：用 `fetch()` 测"带 token 的 URL"会得到 **401**，
+  因为 Node 的 `fetch` 默认 `redirect:"follow"` 却**不保存 cookie** → 跟随后的请求没 cookie。
+  必须用 `redirect: "manual"` 看 303，或用真实浏览器/WebView 测。
+- **验证**：`fetch(url, {redirect:"manual"})` → `status=303`、`set-cookie` 存在、`location=/`。
+
+### G9. 「以 root 身份手动跑引擎」会污染 app 的 dsh-home（域/属主双重坑）
+
+- **现象**：排查 G7 时手动跑了一次引擎做实验，随后 App 反而起不来了，日志变成
+  `EACCES: permission denied, open '<app>/files/dsh-home/.credentials.yaml'`
+  → `plugin tree failed to load`。
+- **根因**：实验时把 `DSH_HOME` 指向了 **app 自己的 dsh-home**，而进程身份是 **root**。
+  引擎初始化 credentials 插件时会**创建** `.credentials.yaml`，于是该文件属主成了
+  `root:root 0600`；App 以 `u0_a491` 启动后**读不了自己的凭据文件** → 启动即崩。
+  同理还会留下 root 属主的 `tmp/dsh-spill-*` 等残渣。
+- **修法/纪律**：
+  - 手动跑引擎做实验时，**`DSH_HOME` 一律指到独立临时目录**（如复制一份到
+    `/data/local/tmp/`），**绝不指向 app 真实的 dsh-home**；
+  - 实验后**核对 `find <app数据目录> -user root`** 必须为空，`kill` 干净并删除临时目录；
+  - 一旦中招：删掉/改属主那个文件即可恢复（App 随后会自己重建正确的）。
+- **验证**：`find /data/user/0/app.dsh.mobile.dev -user root` 无输出。
+- **附带教训**：**不要用 `pkill -f <模式>` / `ps | grep <命令行>` 再 kill** —— 自己的
+  命令行里就含那个模式，会**杀掉自己**（本次实测：整条命令被 SIGTERM，无任何输出）。
+  按端口定位再 kill 才安全（`ss -ltnp | awk '/:<port>/'`）。
+
