@@ -203,3 +203,111 @@
 - **现象**：装 x86_64 的 APK 报 `INSTALL_FAILED_NO_MATCHING_ABIS`。
 - **根因**：真机是 arm64，该 APK 只含 x86_64 原生库。x86_64 只对 PC 上的安卓模拟器有意义。
 - **修法**：矩阵只保留 arm64-v8a。（commit `1f016f1`）
+
+---
+
+## G. 上游 dsh 引擎升级（0.1.1-rc.2 → 0.1.5-rc.1）
+
+> 本节是升级 0.1.5-rc.1 时逐条实测出来的。**升级上游版本前必读** ——
+> 这五条都属于"CI 绿、装上去却起不来/不能用"的类型，静态断言不覆盖。
+
+### G1. 「补丁断言失败 → CI 全挂」的真实根因，不是"包被移出依赖树"
+
+- **现象**：collect 脚本里原注释称，当年 CI 全挂是因为上游 0.1.5-rc.1
+  "把 session-persistence-jsonl 从依赖树移除 → 补丁断言失败"。
+- **根因**：**这个说法不成立**。实测（`pnpm install --lockfile-only` 解析）
+  `@deepseek-ai/dsh-session-persistence-jsonl` 仍在树里，版本 `0.1.5-rc.2`。
+  真正原因是**补丁期望的 import 字符串变了** —— 上游在 `node:fs/promises` 的
+  导入列表里**多了一个 `lstat`**，于是 `includes(oldImport)` 为假 → `exit 1`。
+- **教训**：断言失败的信息（"shape changed"）是对的，但对根因的**推断**是错的。
+  别把推断当结论写进注释，它会误导下一个 Agent 去查错误的方向。
+- **验证**：`grep -c dsh-session-persistence-jsonl pnpm-lock.yaml` 非 0。
+
+### G2. ★0.1.5 的 `defaultFileSystem` 顶层字面量：删 import 里的 `link` = 引擎启动即崩
+
+- **现象**：按"老补丁的写法"（从 `node:fs/promises` 导入里**删掉 `link`**、
+  加上 `rename`）打补丁，模块一加载就
+  `ReferenceError: link is not defined`。
+- **根因**：0.1.5 新增了一个**模块顶层**的对象字面量，其中 `link` 是**简写属性**：
+
+  ```js
+  const defaultFileSystem = {
+  	...
+  	lstat: (path) => lstat(path),
+  	link,          // ← 顶层求值：import 里没有 link 就立刻 ReferenceError
+  	rm: (path) => rm(path, { force: true })
+  };
+  ```
+
+  简写属性在**模块求值时**就要取 `link` 的值，所以不是"调用时才炸"，而是**加载即炸**。
+  旧版（0.1.1-rc.2）没有这个字面量、全文只有一处 `link`，所以老补丁删 `link` 是安全的。
+- **修法**：`link` 和 `lstat` **都保留**，只**新增** `rename`，只替换那一次调用。
+  即"差集只有新增 rename"，不做任何删除。
+- **验证**：用真实依赖闭包（pnpm 装 `dsh-session-persistence-jsonl@0.1.5-rc.2`）
+  在本机 android/arm64 上 `await import(...)`：
+  新补丁 → 加载成功；老补丁 → `ReferenceError at lib/index.js:1608`。
+- **通用教训**：**改动上游 import 列表前，先看这些绑定在文件里还有没有别的引用**
+  （尤其顶层字面量/简写属性）。"只用到一次"的结论必须用 grep 验证，不能凭印象。
+
+### G3. ★0.1.5 新增 flock：不处理则会话根本写不进磁盘
+
+- **现象**：升级后 AI 无法正常对话（会话落盘失败）。
+- **根因**：0.1.5 从 `@deepseek-ai/node-addon-system/flock` 引入 `tryLockExclusive`，
+  用在会话写入前的写锁上：
+  `ensureLease() → acquireWriteLease() → SessionWriteLease.acquire() → tryLockExclusive(fd)`。
+  该族包**只有 darwin/linux 平台包**，android 上调用即抛
+  `ERR_FLOCK_UNSUPPORTED_PLATFORM`；而代码只把 `EAGAIN/EWOULDBLOCK` 当作
+  "被他人占用"（转 `SessionAlreadyOwnedError`），其他错误**直接上抛**。
+- **注意**：该包**导入是安全的**（源码注释明写 "importing it does not load a native addon"），
+  炸的是**调用**。所以"能 import 就没事"是错的判断方式。
+- **修法**：打桩为"立即成功"。依据是上游自己给浏览器 worker 的同款处理
+  （源码注释：单进程，in-process write claim 已排除所有写入者）—— Android 应用内引擎同样是单进程。
+- **验证**：本机 android/arm64 实跑真实 `flock.js`：
+  `tryLockExclusive(0)` → `ERR_FLOCK_UNSUPPORTED_PLATFORM | flock is not supported on android-arm64`。
+
+### G4. ★0.1.5 会话格式 v0 → v3：迁移路径上还有**第二个**硬链接点
+
+- **现象**：老会话（v0 格式）在升级后加载/迁移时报 EACCES。
+- **根因**：新版迁移发布路径 `publishPreparedMigration → publishCurrentExclusive`
+  用的是 `internals.fs.link(staged, currentPath)`，**旧版全文没有这个调用点**。
+  而 `SESSION_FORMAT_VERSION` 由 **0 → 3**，catalog 带 `v0→v1→v2→v3` 完整迁移链，
+  所以**用户既有会话必定走迁移**，这个点一定会被走到。
+- **修法**：`defaultFileSystem.link` 在 android 下换成 `androidLink`：
+  `lstat` 预检 + 同目录 `rename`，**复刻 `link(2)` 的 no-overwrite 语义**
+  （目标已存在时抛 `EEXIST`，调用方据此转 `published=false` 走校验分支，绝不覆盖）。
+  非 android 平台走原生 `link`，行为不变。
+- **为什么 rename 替代是等价的**：发布成功后代码会 `removeCommittedTemporary(staged.path)`，
+  而该函数是 `try{rm}catch{}` 吞错，所以 rename 把源移走不会引发问题；
+  `currentIdentity` 取 `stat(currentPath)`，rename 保留 inode，identity 语义一致。
+- **验证**：单测 `androidLink` —— 新目标发布成功且内容正确 / 已存在目标抛 `EEXIST`
+  且内容未被覆盖 / 源缺失时 `ENOENT` 原样上抛。
+
+### G5. landlock 补丁可以整条删掉（新包已 import-safe + fail-soft）
+
+- **现象**：`node-addon-landlock-run` 在 0.1.5 被重组进
+  `@deepseek-ai/node-addon-system/landlock-run`（加子路径），老补丁正则不再匹配。
+  且该补丁**原本没有断言** → 会**静默失效**（landlock import 摘不掉）。
+- **根因/新事实**：新实现是**纯 JS + 诚实失败**：导入时不 require 任何原生 `.node`，
+  `launcherPath()` 内部 catch 住解析失败，`probe()` 拿不到二进制时返回 `"unusable"`
+  —— 自然走上游原版 fail-closed 路径（受限模式抛 `SANDBOX_UNAVAILABLE`）。
+- **修法**：**整条删除**该补丁，让上游原样跑。
+  老桩不但多余，还把 `LAUNCHER_FAILURE_EXIT` 写死成 **126**（上游现为 **125**），是错的常量。
+- **验证**：本机 android/arm64 实跑真实 `node-addon-system/lib/index.js`：
+  导入成功、`probe() === "unusable"`、`LAUNCHER_FAILURE_EXIT === 125`。
+- **保留的反向断言**：补丁仍断言"landlock import 必须以上游原样存在"。
+  将来上游再改形状、或有人按老写法重新打桩，会**显式失败**而不是静默通过 ——
+  这正是 G5 一开始能静默失效的原因，必须堵住。
+
+### G6. 别用 `link()` 实测来推翻仓库的 EACCES 结论（SELinux 域陷阱）
+
+- **现象**：为验证"Android 禁硬链接"是否还成立，我在 /tmp 和 app 的 dsh-home 里
+  实测 `fs.link()`，**都成功了**，一度以为可以删掉 rename 补丁。
+- **根因**：**实验被污染**。`cat /proc/self/attr/current` 显示当前进程在
+  `u:r:ksu:s0`（KernelSU root 域），而 app 跑在 `untrusted_app` 域。
+  SELinux 按**域**判定 `link` 权限，**`process.setuid()` 只换 uid 不换域**，
+  所以降权到 app uid 也复现不出 app 的真实处境。
+- **修法/纪律**：这类"文件系统权限"结论，**在 shell 里当 root 测几乎必然测错**。
+  要么真机装上去验证，要么明确标注"本实验域不匹配、不作为依据"。
+- **遗留状态**：仓库历史结论（app 域下 `link()` → EACCES）**既未被证实也未被证伪**，
+  升级时按保守做法保留 rename 替代。
+

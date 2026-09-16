@@ -92,10 +92,14 @@ rm -rf "$ROOT/data"
 # --ignore-scripts 禁掉 postinstall，防Linux-x64 native 构建/二进制混入。
 # 若未来引入真 native 依赖（如 better-sqlite3），需针对 bionic 十字编译，
 # 到时按报错在此处做平台裁剪或替换实现。
-# 锁定版本：与本地验证过的 runtime 完全一致。浮动 latest 曾撞上上游 0.1.5-rc.1
-# 重构（session-persistence-jsonl 从依赖树移除 → 补丁断言失败 → CI 全挂）。
-# 上游适配后可再升级（需重跑本地验证链）。
-DSH_VERSION="${DSH_VERSION:-0.1.1-rc.2}"
+# 锁定版本：与本地验证过的 runtime 完全一致。浮动 latest 曾撞上上游 0.1.5-rc.x
+# 重构（补丁目标的源码形状变了 → 补丁断言失败 → CI 全挂）。
+# 注意：当年 CI 全挂的原因【不是】"session-persistence-jsonl 被移出依赖树" ——
+# 实测它仍在树里；真正原因是补丁期望的 import 字符串变了（新增 lstat）。
+#
+# 0.1.5-rc.1 的 Android 适配见下方 3.6 各补丁注释（4 处，其中 flock 与迁移硬链接
+# 为本版新增，不处理会导致会话写不进磁盘）。会话格式 v0 → v3，老会话会走迁移链。
+DSH_VERSION="${DSH_VERSION:-0.1.5-rc.1}"
 mkdir -p "$WORK/bundle" && cd "$WORK/bundle"
 printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s"}}' \
   "$DSH_VERSION" > package.json
@@ -169,74 +173,185 @@ module.exports.spawn = function () {
 };
 JSEOF
 
-# [dsh-sandbox-local] 外科手术：仅摘除两行 glibc-only native import
-#   (node-addon-landlock-run / dsh-sandbox-windows-acl)，其余源码保持上游原样。
-# bwrap/landlock 在 Android 内核上本就不存在，受限模式会经原版 fail-closed
-# 路径抛 SANDBOX_UNAVAILABLE（诚实失败）；danger-full-access 显式放行。
+# [dsh-sandbox-local] 外科手术：仅摘除 Windows-only 的 dsh-sandbox-windows-acl import。
+#
+# ★ 关于 landlock（旧补丁 A，本版【整段删除】，别再按老写法加回来）：
+#   0.1.5 上游把 node-addon-landlock-run 重组进了 @deepseek-ai/node-addon-system/landlock-run，
+#   而新实现是【导入安全 + 诚实失败】的：纯 JS，导入时不 require 任何原生 .node，
+#   launcherPath() 内部 catch 住解析失败，probe() 在拿不到二进制时返回 "unusable"
+#   —— 自然走上游原版 fail-closed 路径（受限模式抛 SANDBOX_UNAVAILABLE，danger-full-access 放行）。
+#   实测（android/arm64 真机 node v24.18.0）：导入成功，probe() === "unusable"。
+#   老桩不但多余，还把 LAUNCHER_FAILURE_EXIT 写死成 126（上游现为 125），是错的常量。
+#   若未来再引入"导入即 require 原生模块"的包，必须改回打桩 —— 下面的反向断言会拦住
+#   "landlock import 消失"这种情况，避免静默变化。
+#
+# windows-acl 仍然摘除：其依赖链 (dsh-sandbox-windows-acl → dsh-win32-process → koffi)
+# 在 Android 上全是 Windows 死代码；摘除后其四个绑定由下方桩提供，语义不变。
 SL="$NM/@deepseek-ai/dsh-sandbox-local/lib/index.js"
 node -e '
 const fs = require("fs");
 const p = process.argv[1];
 let s = fs.readFileSync(p, "utf8");
+const ACL_RE = /^import\s*\{[^}]*\}\s*from\s*"@deepseek-ai\/dsh-sandbox-windows-acl";?\s*$/m;
+if (!ACL_RE.test(s)) {
+  console.error("sandbox-local patch failed: windows-acl import shape changed");
+  process.exit(1);
+}
 s = s.replace(
-  /^import\s*\{[^}]*\}\s*from\s*"@deepseek-ai\/node-addon-landlock-run";?\s*$/m,
-  `const LAUNCHER_BIN = "";
-const LAUNCHER_FAILURE_EXIT = 126;
-const grantArgs = () => [];
-const launcherPath = () => "";
-const probe = () => ({ usable: false });`
-);
-s = s.replace(
-  /^import\s*\{[^}]*\}\s*from\s*"@deepseek-ai\/dsh-sandbox-windows-acl";?\s*$/m,
+  ACL_RE,
   `const AclWriteGrant = null;
 const assertTempRootOutsideWorkspace = () => {};
 const tempWriteSid = () => "";
 const workspaceWriteSid = () => "";`
 );
 fs.writeFileSync(p, s);
-// 只断言【import 语句】消失；Windows-only 分支里的 import.meta.resolve
-// 字符串引用保留（永不执行于 Android，属上游原件）
 const out = fs.readFileSync(p, "utf8");
-if (/^import\s*\{[^}]*\}\s*from\s*"[^"]*(node-addon-landlock-run|dsh-sandbox-windows-acl)/m.test(out)) {
-  console.error("patch failed: native imports still present");
+if (/^import\s*\{[^}]*\}\s*from\s*"[^"]*dsh-sandbox-windows-acl/m.test(out)) {
+  console.error("sandbox-local patch failed: windows-acl import still present");
   process.exit(1);
 }
-console.log("sandbox-local patched ok");
+// 反向断言：landlock 必须以【上游原样】留在文件里。它一旦消失，说明上游又换了形状
+// 或有人重新打了桩 —— 显式失败，好过静默地把错误常量带进运行时。
+if (!/"@deepseek-ai\/node-addon-system\/landlock-run"/.test(out)) {
+  console.error("sandbox-local patch failed: landlock import missing (上游形状变了，或有人重新打桩)");
+  process.exit(1);
+}
+console.log("sandbox-local patched ok: windows-acl removed, landlock left upstream-pristine");
 ' "$SL"
 
-# [dsh-session-persistence-jsonl] Android 禁止普通 App 创建硬链接（EACCES）。
-# 首次会话落盘原本使用 fs.promises.link(tmp, finalPath) 做原子发布；临时文件
-# 与目标文件同目录时，rename 同样具备原子发布语义，且是 Android 允许的普通操作。
+# [dsh-session-persistence-jsonl] 本版共 4 处 Android 适配，逐条注明理由。
+#
+# (1) 首次会话落盘用 fs.promises.link(tmp, finalPath) 做原子发布。Android 沙箱内
+#     硬链接不可用（EACCES，see docs/PITFALLS.md）；临时文件与目标同目录时 rename
+#     具备同样的原子发布语义，且是 Android 允许的普通操作。
+#     ⚠️ 本机实测（root 域 u:r:ksu:s0）link() 会成功，但那是 SELinux 域被污染的
+#     无效实验 —— app 跑在 untrusted_app 域，setuid 不换域。故仍按仓库历史真机
+#     结论走保守做法。
+# (2) ★0.1.5 新增了【模块顶层】的 defaultFileSystem 字面量，其中 `link` 是简写属性
+#     (`link,`)，在模块加载时即求值。因此 import 里的 link 【绝不能被删掉】：
+#     老补丁的 newImport 会删 link，直接沿用 → 引擎启动即 ReferenceError: link is
+#     not defined（本机实测复现）。同理 lstat 是新增引用（defaultFileSystem.lstat、
+#     internals.fs.lstat），也必须保留。正解：link/lstat 都留，只新增 rename。
+# (3) ★0.1.5 新增 flock 写锁：@deepseek-ai/node-addon-system/flock 只有 darwin/linux
+#     平台包，android 上 tryLockExclusive() 抛 ERR_FLOCK_UNSUPPORTED_PLATFORM
+#     （本机实测：flock is not supported on android-arm64）。它位于会话写入前的
+#     ensureLease() 路径（690 行），且只有 EAGAIN/EWOULDBLOCK 被当作"被占用"转成
+#     SessionAlreadyOwnedError，其他错误直接上抛 —— 不处理则【会话根本写不进磁盘】，
+#     表现为"AI 无法对话"。按上游自己给浏览器 worker 的同款理由打桩为"立即成功"：
+#     Android 应用内引擎是单进程，in-process write claim 已排除所有写入者。
+# (4) ★0.1.5 迁移路径新增第二个硬链接点 publishCurrentExclusive → internals.fs.link
+#     （旧版全文只有一处 link，没有这个点）。会话格式 SESSION_FORMAT_VERSION 由
+#     v0 → v3，catalog 带 v0→v1→v2→v3 完整迁移链，用户既有老会话必定走迁移，
+#     故该点必须同样 Android 化：用 lstat 预检 + rename 复刻 link(2) 的 no-overwrite
+#     语义（目标已存在时抛 EEXIST，调用方据此转 published=false 走校验分支）。
+#     仅对 process.platform === "android" 生效，其他平台行为完全不变。
 SP="$NM/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js"
+# 缺这个文件就是上游又重组了：必须硬失败。老版本这里是 WARN+跳过，
+# 会静默产出一个没打补丁的 runtime（用户会拿到"装得上但写不进会话"的包）。
 if [ ! -f "$SP" ]; then
-  echo "WARN: dsh-session-persistence-jsonl not in dependency tree (upstream restructure) - patch skipped"
-else
+  echo "错误：dsh-session-persistence-jsonl/lib/index.js 缺失（上游又重组了？）" >&2
+  exit 1
+fi
 node -e '
 const fs = require("fs");
 const p = process.argv[1];
 let s = fs.readFileSync(p, "utf8");
-const oldImport = "import { link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";";
-const newImport = "import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, truncate } from \"node:fs/promises\";";
+
+// ---- (2) import：保留 link/lstat，只新增 rename ----
+// oldImport = 0.1.5 上游的实际形状（相对 0.1.1 多了 lstat）；
+// newImport = 在其基础上补 rename。两者差集只有"新增 rename"，link/lstat 都不动。
+const oldImport = "import { link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";";
+const newImport = "import { link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, truncate } from \"node:fs/promises\";";
 if (!s.includes(oldImport)) {
   console.error("session persistence patch failed: fs/promises import shape changed");
   process.exit(1);
 }
 s = s.replace(oldImport, newImport);
-const oldCall = "await link(tmp, finalPath);";
+
+// ---- (1) 单次 link 调用 → rename ----
 if ((s.match(/await link\(tmp, finalPath\);/g) || []).length !== 1) {
   console.error("session persistence patch failed: expected one link(tmp, finalPath) call");
   process.exit(1);
 }
-s = s.replace(oldCall, "await rename(tmp, finalPath);");
-fs.writeFileSync(p, s);
-const out = fs.readFileSync(p, "utf8");
-if (out.includes("await link(tmp, finalPath);") || !out.includes("await rename(tmp, finalPath);")) {
-  console.error("session persistence patch failed: rename call not installed");
+s = s.replace("await link(tmp, finalPath);", "await rename(tmp, finalPath);");
+
+// ---- (3) flock 打桩（android 单进程）----
+const flockImport = "import { tryLockExclusive } from \"@deepseek-ai/node-addon-system/flock\";";
+if (!s.includes(flockImport)) {
+  console.error("session persistence patch failed: flock import shape changed");
   process.exit(1);
 }
-console.log("session persistence patched ok: link -> rename");
+s = s.replace(flockImport, [
+  "/* Android: 该包只有 darwin/linux 平台包, tryLockExclusive() 在 android 抛",
+  "   ERR_FLOCK_UNSUPPORTED_PLATFORM, 而它位于会话写入前的 ensureLease() 路径上。",
+  "   应用内引擎是单进程, in-process write claim 已排除所有写入者 —— 与上游对",
+  "   浏览器 worker 的处理同理由, 打桩为立即成功。 */",
+  "const tryLockExclusive = async () => {};",
+].join("\n"));
+
+// ---- (4) 迁移路径第二个硬链接点 ----
+// 只在 defaultFileSystem 字面量内部替换，避免误伤文件他处的 link 引用。
+const dsoStart = s.indexOf("const defaultFileSystem = {");
+if (dsoStart < 0) {
+  console.error("session persistence patch failed: defaultFileSystem literal not found");
+  process.exit(1);
+}
+const dsoEnd = s.indexOf("\n};", dsoStart);
+if (dsoEnd < 0) {
+  console.error("session persistence patch failed: defaultFileSystem literal unterminated");
+  process.exit(1);
+}
+let dso = s.slice(dsoStart, dsoEnd);
+if ((dso.match(/\n\tlink,\n/g) || []).length !== 1) {
+  console.error("session persistence patch failed: defaultFileSystem link member shape changed");
+  process.exit(1);
+}
+dso = dso.replace("\n\tlink,\n", "\n\tlink: process.platform === \"android\" ? androidLink : link,\n");
+const androidLinkDef = [
+  "/**",
+  " * Android 复刻 link(2) 的 no-overwrite 发布语义: lstat 预检 + 同目录 rename。",
+  " * 目标已存在时抛 EEXIST, 调用方 (publishCurrentExclusive) 据此返回 false。",
+  " * 非 android 平台直接走原生 link, 行为完全不变。",
+  " */",
+  "const androidLink = async (existingPath, newPath) => {",
+  "\tlet present = true;",
+  "\ttry {",
+  "\t\tawait lstat(newPath);",
+  "\t} catch (error) {",
+  "\t\tif (error?.code === \"ENOENT\") present = false;",
+  "\t\telse throw error;",
+  "\t}",
+  "\tif (present) throw Object.assign(new Error(`EEXIST: file already exists, link '\''${existingPath}'\'' -> '\''${newPath}'\''`), {",
+  "\t\tcode: \"EEXIST\",",
+  "\t\terrno: -17,",
+  "\t\tsyscall: \"link\",",
+  "\t\tpath: newPath,",
+  "\t\tdest: existingPath",
+  "\t});",
+  "\tawait rename(existingPath, newPath);",
+  "};",
+  "",
+].join("\n");
+s = s.slice(0, dsoStart) + androidLinkDef + dso + s.slice(dsoEnd);
+fs.writeFileSync(p, s);
+
+// ---------------- 断言（全绿才算补丁成立）----------------
+const out = fs.readFileSync(p, "utf8");
+const fail = (m) => { console.error("session persistence patch failed: " + m); process.exit(1); };
+if (!out.includes(newImport)) fail("link/lstat 未被完整保留 (ReferenceError 风险)");
+if (out.includes("await link(tmp, finalPath);")) fail("旧的 link 调用仍在");
+if (!out.includes("await rename(tmp, finalPath);")) fail("rename 调用未安装");
+if (out.includes("@deepseek-ai/node-addon-system/flock")) fail("flock import 未被摘除");
+if (!out.includes("const tryLockExclusive = async () => {};")) fail("flock 桩未安装");
+if (!out.includes("link: process.platform === \"android\" ? androidLink : link,")) fail("迁移路径 link 未被 Android 化");
+if (!out.includes("const androidLink = async (existingPath, newPath) => {")) fail("androidLink 定义缺失");
+// 反向断言：link/lstat/rename 三个绑定在 import 里必须同时存在。
+for (const id of ["link", "lstat", "rename"]) {
+  const re = new RegExp("^import \\{[^}]*\\b" + id + "\\b[^}]*\\} from \"node:fs/promises\";$", "m");
+  if (!re.test(out)) fail("node:fs/promises 里缺少绑定: " + id);
+}
+console.log("session persistence patched ok: rename + flock stub + android link shim");
 ' "$SP"
-fi
 
 # [@vscode/ripgrep] npm 在 Ubuntu runner 上会选择 linux-x64 optional binary，
 # 不适用于 Android。m1.7 重构：不再对上游 index.js 做文本块替换（上游改版即碎，
@@ -419,7 +534,7 @@ if find "$ROOT" -type f -path '*@vscode/ripgrep-linux-*/*/rg' -print -quit | gre
   exit 1
 fi
 
-echo "Android 补丁完成：koffi/inert, node-pty/shim, sandbox-local/source-patch, session-persistence/rename, dsh-fs-local/rename, ripgrep/平台包注入, soname-aliases, pnpm+curl wrapper"
+echo "Android 补丁完成：koffi/inert, node-pty/shim, sandbox-local/windows-acl-only, session-persistence/{rename,flock-stub,link-shim}, dsh-fs-local/rename, ripgrep/平台包注入, soname-aliases, pnpm+curl wrapper"
 echo "dsh 引擎已集成：$(du -sh "$ROOT/lib/node_modules" | cut -f1)，样例 $(ls "$ROOT/lib/node_modules/@deepseek-ai" 2>/dev/null | head -n4 | tr '\n' ' ')"
 
 # ---- 4. 精简：剔除文档/头文件/npm 冗余，控制体积 ----
