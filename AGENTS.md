@@ -80,10 +80,19 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 | 位置 | 谁生成 | 给谁看 | 能不能手改 |
 |---|---|---|---|
 | **仓库根 `AGENTS.md`**（本文件） | 人写的 | 改**源码**的 Agent | ✅ 随便改 |
-| `$DSH_HOME/AGENTS.md`（手机里） | App 自动生成，见 `AgentContextSeed.kt` | 跑在**手机 App 里**的 Agent | ⚠️ 改了会在种子版本升级时被覆盖 |
+| `$DSH_HOME/AGENTS.md`（手机里） | App 自动生成，见 `AgentContextSeed.kt` | 跑在**手机 App 里**的 Agent | ⚠️ 会被自动更新，见下 |
 
 改错文件会白费功夫，甚至误导 Agent。
-第二个文件的种子版本号（`SEED_VERSION`）一升就会重写内容 —— **改了那里的文案，必须同步递增版本号**，否则升级不生效。
+
+第二个文件的更新规则（`AgentContextSeed.ensure`）分三层，改动时别破坏这个分层：
+
+1. **模板文案变了** → 必须递增 `SEED_VERSION`，旧文件才会被全文覆盖升级。
+2. **随环境变化的行**（`- Currently activated:` 已激活扩展、`## Privilege mode:` 特权模式、
+   以及 shizuku 专属的 `- shz:` 行）→ **不需要**递增版本号，每次引擎启动会**就地同步**这三行，
+   其余内容（含用户/Agent 追加的笔记）保持不动。
+   历史教训：v8 早期只比版本号就 return，导致装完 openjdk-17 后该行仍长期写着 `none yet`，
+   Agent 据此以为自己没有 JDK / 没有 root —— 见 `docs/PITFALLS.md` G11。
+3. **用户自己写的文件**（无种子标记）→ 绝不覆盖。
 
 ---
 
