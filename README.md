@@ -2,8 +2,8 @@
 
 **Deepseek-Harness-Local-Android — 在手机上运行完整的 DeepSeek Harness AI Agent（Local for Android）—— 无需 Root，无需 Termux，无需电脑。** —— 无需 Root，无需 Termux，无需电脑。**
 
-[![CI](https://github.com/Soodok/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/Soodok/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
-![Release](https://img.shields.io/badge/release-v1.2.20-blue)
+[![CI](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
+![Release](https://img.shields.io/badge/release-v1.2.26-blue)
 ![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
@@ -80,7 +80,7 @@ Agent 不只会用扩展中心，还会自己动手：会话里通过本地接�
 
 ## 📦 安装
 
-**下载 Release（推荐）**：前往 [Releases](https://github.com/Soodok/Deepseek-Harness-Local-Android/releases) 下载 APK（手机选 `arm64-v8a`，最新版 **v1.2.20**），允许安装未知来源应用后安装。v1.0.0+ 均可覆盖安装。
+**下载 Release（推荐）**：前往 [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) 下载 APK（手机选 `arm64-v8a`，最新版 **v1.2.26**），允许安装未知来源应用后安装。v1.0.0+ 均可覆盖安装。
 
 **从源码构建**（JDK 17 + Android SDK，NDK r26+、CMake 3.22.1）：
 
@@ -125,7 +125,7 @@ gradle assembleDebug -Pabi=arm64-v8a
 
 ## 反馈
 
-遇到问题或功能建议，欢迎提交 [Issue](https://github.com/Soodok/Deepseek-Harness-Local-Android/issues)；崩溃类问题请附上 `logcat` 输出或应用内的引擎日志。
+遇到问题或功能建议，欢迎提交 [Issue](https://github.com/743553649/Deepseek-Harness-Local-Android/issues)；崩溃类问题请附上 `logcat` 输出或应用内的引擎日志。
 
 ## 许可证
 
