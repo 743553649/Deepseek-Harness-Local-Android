@@ -10,12 +10,13 @@
 ## 一句话架构
 
 一个 Android 外壳（Kotlin）+ 一个塞进 `assets` 的 **Node 运行时**，运行时装进应用私有目录，
-由外壳 fork 出 Node 进程跑完整的 DeepSeek Harness 引擎，WebView 加载 `127.0.0.1` 上的 Web UI。
+由外壳 fork 出 Node 进程跑完整的 DeepSeek Harness 引擎，WebView 加载 `127.0.0.1` 上的 Web UI
+（dsh **0.1.5 起该 URL 必须带进程 token**，否则只有 401，见「WebUI 会话认证」）。
 另有若干原生能力（无障碍读屏点击、通知、Shizuku/root 提权）以**环回 HTTP 桥**的形式暴露给引擎内的 Agent。
 
 ```
 ┌─ Android App (Kotlin) ────────────────────────────────┐
-│  MainActivity ──WebView──► http://127.0.0.1:<引擎端口>/ │
+│  MainActivity ──WebView──► http://127.0.0.1:<端口>/?token=… │
 │       │                                                │
 │  EngineService（前台服务，保活）                        │
 │       │                                                │
@@ -36,14 +37,14 @@
 | # | 位置 | 做什么 |
 |---|---|---|
 | 1 | `DshApp.kt` | Application 入口（Manifest 的 `android:name`） |
-| 2 | `MainActivity.kt` | 启动 `EngineService`，订阅状态流；Healthy 后 WebView 加载 `http://127.0.0.1:${state.port}/` |
+| 2 | `MainActivity.kt` | 启动 `EngineService`，订阅状态流；Healthy 后 WebView 加载 `state.webUrl`（引擎宣布的**带认证 token 入口**，0.1.5+；未宣布时退回裸 `http://127.0.0.1:${state.port}/`） |
 | 3 | `service/EngineService.kt` | 前台服务（`specialUse` 类型，规避 Android 14 的 dataSync 6 小时上限） |
 | 4 | `engine/EngineSupervisor.kt` | **核心状态机**：`Idle → Installing → Starting → Healthy(port)`，失败走 `Backoff → Failed` |
 | 5 | `engine/RuntimeInstaller.kt` | Installing 阶段：解压 `assets/runtime.zip` 到 `filesDir/engine`，恢复可执行位 |
 | 6 | `engine/EngineConfig.kt` | 组装子进程环境变量（PATH / LD_LIBRARY_PATH / DSH_HOME / 端口常量…） |
 | 7 | `engine/EngineProcess.kt` | **fork + exec**：`node --expose-internals <dsh bin.js> web --no-open --port <n>`（ROOT 模式下外层套 `su -c`） |
 | 8 | `engine/Pty.kt` + `cpp/dsh_pty.c` | 原生 PTY，让引擎进程有终端（日志双写 logcat + `engine/engine.log`） |
-| 9 | `EngineSupervisor.pollHealth()` | 轮询 `http://127.0.0.1:<port>/` 直到响应 → `Healthy(port)` |
+| 9 | `EngineSupervisor.pollHealth()` + `awaitWebUrl()` | 轮询 `http://127.0.0.1:<port>/` 直到**有响应**（判定区间 `200..499` —— 0.1.5 的 401 也算，这是"假就绪"的来源，见「WebUI 会话认证」）→ 再等 stdout 打印 `dsh web: <url>`（带 token，最多 15s）→ 发布 `Healthy(port, webUrl)` |
 | 10 | 同 4 | Healthy 后启动 `AgentBridge`；Shizuku 模式下启动 `ShizukuHttpBridge` |
 
 ### 状态机
@@ -134,25 +135,25 @@ scripts/
 |---|---|---|---|
 | `engine/ExtensionManager.kt` | 767 | 扩展中心：Termux 仓库实时安装（索引 → 依赖闭包 → .deb → 解包 → 原子发布） | 改扩展机制 |
 | `SettingsActivity.kt` | 423 | 设置页（权限模式 / 显示 / 扩展入口） | 加设置项 |
-| `MainActivity.kt` | 391 | WebView 外壳 + 状态条 + 预览模式 | 改主界面 |
+| `MainActivity.kt` | 394 | WebView 外壳 + 状态条 + 预览模式；Healthy 后用 `state.webUrl`（带 token）加载 | 改主界面 |
 | `ExtensionStoreActivity.kt` | 390 | 扩展中心 UI | 改扩展 UI |
 | `engine/EngineConfig.kt` | 347 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入** | 改端口 / 环境变量 / 注入脚本 |
 | `engine/AgentBridge.kt` | 345 | 环回 HTTP：通知 / 读屏 / 点击 / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
-| `engine/EngineSupervisor.kt` | 313 | 状态机 + 健康检查 + 退避重启 | 改启动/自愈逻辑 |
+| `engine/EngineSupervisor.kt` | 348 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启 | 改启动/自愈逻辑 |
 | `engine/ProfileGuardian.kt` | 308 | 自愈层：健康快照 / last-good 回滚 / 安全模式 | 改自愈策略 |
 | `engine/Privilege.kt` | 244 | NORMAL / SHIZUKU / ROOT 三模式探测与切换，dsh-home 保护 | 改权限模式 |
 | `OnboardingActivity.kt` | 232 | 首次启动引导 | 改引导流程 |
 | `engine/RuntimeInstaller.kt` | 208 | 安装 `assets/runtime.zip`（或 MANIFEST 远程包） | 改安装逻辑 |
 | `service/EngineService.kt` | 169 | 前台服务 | 改保活 |
-| `engine/EngineProcess.kt` | 157 | fork + exec 引擎进程（`--port` 在这里） | 改启动参数 |
+| `engine/EngineProcess.kt` | 191 | fork + exec 引擎进程（`--port` 在这里）；**扫描 stdout 捕获 `dsh web:` 入口** | 改启动参数 |
 | `DshAccessibilityService.kt` | 153 | 无障碍服务（模拟点击/滑动） | 改读屏点击 |
-| `engine/AgentContextSeed.kt` | ~105 | 生成 `$DSH_HOME/AGENTS.md`（给 App 内 Agent 的环境说明书） | 改环境事实说明 |
+| `engine/AgentContextSeed.kt` | 161 | 生成并**增量同步** `$DSH_HOME/AGENTS.md`：静态模板靠 `SEED_VERSION` 升级覆盖，动态行（已激活扩展 / 特权模式 / shz）每次启动就地同步 | 改环境事实说明 |
 | `engine/ShizukuHttpBridge.kt` | — | Shizuku 模式的 adb 身份执行桥 | 改 Shizuku |
 | `engine/Pty.kt` + `cpp/dsh_pty.c` | — | 原生 PTY | 少动 |
 
 ---
 
-## 两条重要的数据流
+## 三条重要的数据流
 
 ### 运行时安装（`RuntimeInstaller`）
 
@@ -183,6 +184,34 @@ Packages.gz 索引 → 依赖闭包解析 → 逐包 .deb（SHA-256 强校验）
 
 三态：🔴 未下载 / 🟡 已下载未激活 / 🟢 已激活可用。
 
+### WebUI 会话认证（dsh 0.1.5+，`BrowserAuth`）
+
+**0.1.5 起 WebUI 强制浏览器会话认证，直接开裸 `/` 一律 401**（正文
+`dsh web authentication required; reopen the URL printed by dsh web.`）。
+所以「引擎起来了」和「页面打得开」在 0.1.5 里是两件事：
+
+```
+引擎启动 → stdout 打印  dsh web: http://127.0.0.1:<port>/?token=<进程 launch token>
+   ↓ EngineProcess.scanForWebUrl()：逐行扫描 stdout（行缓冲，防 chunk 从行中间截断）
+webUrlFuture 完成
+   ↓ EngineSupervisor.awaitWebUrl()：最多等 15s；进程提前死亡则立刻放弃
+State.Healthy(port, webUrl)
+   ↓ MainActivity.render()
+WebView.loadUrl(webUrl)
+   ↓ 引擎回 303 → 重定向到 / 并下发签名 cookie（绑定 Host authority）
+之后带 cookie 才放行 → 200 + HTML
+```
+
+三个容易踩的点：
+
+- **健康检查会"假就绪"**：`pollHealth` 的判定区间是 `200..499`，0.1.5 的 401 正落在里面，
+  于是"HTTP 服务器已监听"被当成"WebUI 可用"，而 WebView 其实只会黑屏。
+  **就绪 ≠ 可用**，详见 `docs/PITFALLS.md` G8。
+- **token 是进程级的**：引擎重启就换新的；`MainActivity` 的「预览返回」按钮特意走
+  `healthyWebUrl` 重取一次（会话 cookie 可能已过期，重走 token 链换新）。
+- **旧引擎兼容**：0.1.1 打印同一行但不带 token，走同一条通路后等价于裸 URL，行为不变 ——
+  所以这套适配对新旧引擎都安全。
+
 ---
 
 ## 自愈层（`ProfileGuardian`）
@@ -211,6 +240,8 @@ collect-runtime（单架构 aarch64）
 build-apk（needs: collect-runtime）
   ├─ 下载 runtime artifact → 注入 assets/
   ├─ 回填 MANIFEST 的 version / sha256
+  │    version = "<分支>-<日期>-<sha256 前 12 位>"，**含 runtime 内容指纹** ——
+  │    安装器以 version 为闸门决定是否重装，只精确到日期会让同日重建的修复装不进去（G10）
   ├─ 恢复 .ci/debug.keystore 缓存（固定签名的关键）
   ├─ 未命中 → keytool 现场生成 + 打印密钥库指纹
   ├─ gradle assembleDebug -Pabi=arm64-v8a
@@ -232,17 +263,24 @@ release（if: tag v*，needs: build-apk）
 
 ## 本 fork 相对上游的差异清单
 
-改动集中在 5 个文件，便于将来 `git merge upstream/main` 时定位冲突：
+`git diff --stat upstream/main...HEAD` 实测为 **10 个文件**，便于将来 `git merge upstream/main` 时定位冲突：
 
 | 文件 | 改了什么 |
 |---|---|
 | `app/build.gradle.kts` | `applicationId` → `app.dsh.mobile.dev`；新增 `signingConfigs.debug` 指向 `.ci/debug.keystore` |
 | `engine/EngineConfig.kt` | 新增 `PORT_BASE = 3180` / `AGENT_BRIDGE_PORT`；把散落的硬编码端口改为常量插值 |
-| `engine/EngineProcess.kt` | `spawn()` 增加 `port` 形参，args 追加 `--port` |
-| `engine/EngineSupervisor.kt` | 调用点传 `port = EngineConfig.DEFAULT_PORT` |
-| `engine/AgentContextSeed.kt` | 端口文案改为插值；`SEED_VERSION` 7 → 8 |
+| `engine/AgentBridge.kt` | 桥端口 `3083` 与自诊断探测用的 `3080` 改为 `EngineConfig` 常量 |
+| `engine/EngineProcess.kt` | `spawn()` 增加 `port` 形参、args 追加 `--port`；新增 stdout 扫描捕获 WebUI 入口 |
+| `engine/EngineSupervisor.kt` | 调用点传 `port`；`Healthy`/`SafeMode` 携带 `webUrl`；新增 `awaitWebUrl()` |
+| `MainActivity.kt` | 三处 WebView 加载点改用 `webUrl ?: 裸URL`（0.1.5 会话认证） |
+| `engine/AgentContextSeed.kt` | 端口文案改为插值；`SEED_VERSION` 7 → 8；动态行每次启动就地同步 |
 | `app/src/main/res/values/strings.xml` | 应用名/无障碍标签/通知标题加 `Dev` 后缀；端口文案 |
-| `.github/workflows/android-build.yml` | 单架构矩阵；两个缓存；固定密钥库生成与指纹打印 |
+| `.github/workflows/android-build.yml` | 单架构矩阵；两个缓存；固定密钥库生成与指纹打印；`MANIFEST.version` 并入 runtime 内容指纹（否则同日重建不重装，见 G10）；产物重命名用 `SAFE_REF`（分支名带斜杠会让重命名失败） |
+| `scripts/collect-termux-runtime.sh` | 0.1.5 的 Android 适配：koffi 桩改为真算 LP64 布局（G7）；session-persistence 的 flock 打桩 + 迁移硬链接改 `rename`；sandbox-local 删掉冗余的 landlock 补丁 |
 
-**合并上游时的典型冲突点**：前三行文件。合并后务必回归验证
-`EngineProcess` 的 `--port` 还在（这是最容易被上游覆盖掉的改动）。
+**合并上游时的典型冲突点**：引擎升级适配与端口/token 通路那几行（`EngineProcess` / `EngineSupervisor` /
+`MainActivity` / `AgentContextSeed` / workflow / collect 脚本）。合并后务必回归验证两件事：
+
+1. **`EngineProcess` 的 `--port` 还在** —— 这是最容易被上游覆盖掉的改动（见 `docs/PITFALLS.md` A1）；
+2. **引擎能真正起来** —— 若 `collect-termux-runtime.sh` 里的 koffi 桩被上游版本覆盖，Android 上会立刻
+   崩在模块顶层的 ABI 自检；而 CI 绿、健康检查也照样通过，症状是"显示已就绪但页面打不开"（G7）。
