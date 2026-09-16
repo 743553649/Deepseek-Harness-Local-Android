@@ -84,6 +84,24 @@
 - **修法**：`build-apk` 矩阵只保留单架构（同时也解决了 x86_64 对真机无用的问题）。
 - **验证**：workflow 里 `build-apk.strategy.matrix.include` 长度应为 1。
 
+### B5. 分支名带 `/` 会让构建挂在"重命名 APK"一步，且看不到产物
+
+- **现象**：用 `workflow_dispatch` 跑一个带斜杠的分支（如 `experiment/dsh-0.1.5-rc.1`），
+  `collect-runtime` 全绿、gradle `assembleDebug` 也成功、so 16KB 对齐校验也过，
+  但 `build-apk` 挂在 **「按版本+架构重命名 APK」**，随后的 `upload-artifact` 被跳过
+  → **整条流水线失败且没有任何产物**。日志只有一行：
+  `cp: cannot create regular file 'dist/dsh-android-experiment/dsh-0.1.5-rc.1-arm64-v8a.apk': No such file or directory`
+- **根因**：那一步用 `GITHUB_REF_NAME` 拼文件名，而分支上的 `GITHUB_REF_NAME` 带 `/`，
+  `/` 被当成目录分隔符 → 目标路径的中间目录不存在。**与代码改动无关**，纯 workflow bug。
+- **为什么以前没暴露**：workflow 只在 `main` 和 tag `v*` 上自动触发，这两个 ref 名都不含斜杠；
+  只有手动 dispatch 一个斜杠分支时才会踩到。
+- **修法**：拼文件名前把斜杠换掉 —— `SAFE_REF="${GITHUB_REF_NAME//\//-}"`，
+  并补 `test -f` + `ls -lh dist/` 让失败更显眼。
+- **验证**：本地实测 `experiment/dsh-0.1.5-rc.1 → experiment-dsh-0.1.5-rc.1`；
+  `main` / `v1.2.26` 展开后**保持不变**（不影响自动触发那两条路径）。
+- **教训**：失败发生在**产物上传之前**，所以"构建成功≠有产物"。
+  看到"gradle 成功但流水线红"，先看 rename/upload 这两步，别去怀疑引擎补丁。
+
 ---
 
 ## C. 签名

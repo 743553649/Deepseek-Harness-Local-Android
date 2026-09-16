@@ -197,7 +197,14 @@ jobs:
       - name: 按版本+架构重命名 APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/dsh-android-${GITHUB_REF_NAME}-${{ matrix.abi }}.apk"
+          # GITHUB_REF_NAME 在分支上会带 '/'（如 experiment/dsh-0.1.5-rc.1），直接拼进
+          # 文件名会被当成目录分隔符 → cp 报 "No such file or directory" 而那一步挂掉。
+          # 实测：run #10（2026-09-16）就挂在分支名 experiment/dsh-0.1.5-rc.1 上，
+          # 且因为失败发生在 rename 之后，产物根本没上传。斜杠一律换成连字符。
+          SAFE_REF="${GITHUB_REF_NAME//\//-}"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/dsh-android-${SAFE_REF}-${{ matrix.abi }}.apk"
+          test -f "dist/dsh-android-${SAFE_REF}-${{ matrix.abi }}.apk"
+          ls -lh dist/
 
       - uses: actions/upload-artifact@v4
         with:
