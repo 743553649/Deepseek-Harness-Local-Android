@@ -31,7 +31,7 @@ object AgentContextSeed {
     private const val FILE_NAME = "AGENTS.md"
     private const val MARKER_PREFIX = "<!-- dsh-android AGENTS seed v"
     /** 当前模板版本：改文案必须同步递增，旧版才会被升级覆盖 */
-    private const val SEED_VERSION = 8
+    private const val SEED_VERSION = 9
 
     /** Extension Center 段落标题：既用于渲染，也作为 shz 行的插入锚点 */
     private const val EXT_CENTER_HEADING =
@@ -147,6 +147,7 @@ There is no display server. To show the user anything visual, start a web server
 
 ## Notifications & screen control (Android powers, use them)
 - `notify <message>` — push an Android system notification. **You MUST call this when a long task finishes** (or when you need the user's attention while they may be away): `notify 构建完成，测试全部通过`.
+- `island set "<what you are doing>" [percent]` — show live progress on the phone's status-bar island (ColorOS 16 流体云). Use it on long tasks: once when you start, again whenever the phase changes, e.g. `island set "跑测试中" 60`. Then `island done` when the task finishes (the island keeps "✓ 完成" until the next task starts). `island clear` hands the island back to the app's own status. The island is the user's glanceable view of you — keep the text short (one line, no paths unless essential).
 - `scr dump` — read the current phone screen: JSON of visible texts with coordinates and clickability. Requires the user to have enabled the accessibility service in system settings (returns an error otherwise).
 - `scr tap <x> <y>` — tap the phone screen at pixel coordinates.
 - `scr tap-text <text>` — find a node containing that text and tap it.

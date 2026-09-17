@@ -285,6 +285,8 @@ class EngineSupervisor(private val ctx: Context) {
             logFile = logFile(),
             suPath = suPath,
             port = EngineConfig.DEFAULT_PORT,
+            // v1.2.27：流体云插件补丁层（流体云需要知道"Agent 在思考/在执行"）
+            patchFile = EngineConfig.fluidCloudPatch(ctx),
         )
     }
 

@@ -89,6 +89,8 @@ object EngineConfig {
         // v1.1.0：notify/scr 包装器（所有模式可用——通知与无障碍是 App 自身能力，
         // 经 AgentBridge 127.0.0.1:3083 转发）。
         applyAgentGates(root)
+        // v1.2.27 流体云：写引擎侧插件 + 它的 overlay 补丁层（引擎以 --patch 下发）
+        applyFluidCloudPlugin(ctx)
         // v1.2.0 扩展环境：已激活扩展的 bin/lib 并入 PATH/LD_LIBRARY_PATH
         // （顺序：engine 自带 → 扩展 → 系统，保证 su/notify/scr 闸门优先级不被扩展覆盖）
         val extRoots = ExtensionManager.activeRoots(ctx)
@@ -223,6 +225,9 @@ object EngineConfig {
      *  - scr dump                → GET  /screen（读屏：可见文本+坐标 JSON）
      *  - scr tap <x> <y>         → POST /tap 坐标点击
      *  - scr tap-text <文本>     → POST /tap 按文本点击（无障碍服务开启才可用）
+     *  - island set "<在干嘛>" [百分比] → POST /island（ColorOS 16 流体云，v1.2.27）
+     *  - island done [说明]      → 流体云收尾（常驻「✓ 完成」到下一次任务开始）
+     *  - island clear            → 撤掉上报层，回到自动层
      */
     private fun applyAgentGates(root: File) {
         val bindir = File(root, "bin").apply { mkdirs() }
@@ -237,6 +242,38 @@ object EngineConfig {
                 "    .then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(2));\n" +
                 "' \"${'$'}msg\"\n")
             notify.setExecutable(true, false)
+
+            val island = File(bindir, "island")
+            island.writeText("#!/system/bin/sh\n" +
+                "# [dsh-android] island: show progress on the ColorOS 16 fluid-cloud island.\n" +
+                "#   island set \"<what you are doing>\" [percent]\n" +
+                "#   island done [message]\n" +
+                "#   island clear\n" +
+                "case \"${'$'}1\" in\n" +
+                "  set)\n" +
+                "    [ -z \"${'$'}2\" ] && { echo 'usage: island set \"<action>\" [percent]' >&2; exit 2; }\n" +
+                "    exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
+                "      const [title, progress] = process.argv.slice(1);\n" +
+                "      const body = JSON.stringify({ action: \"set\", title, progress: progress ? Number(progress) : undefined });\n" +
+                "      fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/island\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
+                "        .then(r => r.text()).then(t => { console.log(t); process.exit(t.indexOf(\"ok\\\":true\") >= 0 ? 0 : 1); })\n" +
+                "        .catch(e => { console.error(\"island: \" + e.message); process.exit(2); });\n" +
+                "    ' -- \"${'$'}2\" \"${'$'}3\" ;;\n" +
+                "  done)\n" +
+                "    exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
+                "      const body = JSON.stringify({ action: \"done\", text: process.argv[1] || undefined });\n" +
+                "      fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/island\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body })\n" +
+                "        .then(r => r.text()).then(t => { console.log(t); process.exit(t.indexOf(\"ok\\\":true\") >= 0 ? 0 : 1); })\n" +
+                "        .catch(e => { console.error(\"island: \" + e.message); process.exit(2); });\n" +
+                "    ' -- \"${'$'}2\" ;;\n" +
+                "  clear)\n" +
+                "    exec \"${'$'}(dirname \"${'$'}0\")/node\" -e '\n" +
+                "      fetch(\"http://127.0.0.1:${AGENT_BRIDGE_PORT}/island\", { method: \"POST\", headers: {\"content-type\":\"application/json\"}, body: JSON.stringify({ action: \"clear\" }) })\n" +
+                "        .then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(2));\n" +
+                "    ' ;;\n" +
+                "  *) echo 'usage: island set \"<action>\" [percent] | island done [message] | island clear' >&2; exit 2 ;;\n" +
+                "esac\n")
+            island.setExecutable(true, false)
 
             val scr = File(bindir, "scr")
             scr.writeText("#!/system/bin/sh\n" +
@@ -343,5 +380,75 @@ object EngineConfig {
         }
     }
 
+    /** 流体云插件所在 profile 目录（引擎用 `--profile web` 启动） */
+    private fun webProfile(ctx: android.content.Context): File =
+        File(dshHome(ctx), "profiles/web").apply { mkdirs() }
+
+    /** overlay 补丁层文件（引擎启动时以 `--patch <此文件>` 下发） */
+    fun fluidCloudPatch(ctx: android.content.Context): File =
+        File(dshHome(ctx), ".android-fluid-cloud.patch.yml")
+
+    /**
+     * 流体云（ColorOS 16 / Android 16 live update）引擎侧插件（v1.2.27）。
+     *
+     * 为什么需要它：只有引擎自己知道"Agent 在思考/在执行"，而会话文件的写入活动
+     * 盖不住长命令执行那一段（实测一次 60 秒零写入）。所以订阅引擎的 `agent/status`
+     * 事件（取值只有 running / idle，来自 agent loop 的 phase.kind），状态一变就
+     * POST 给 App 的能力桥 —— 确定性信号，不看模型脸色。
+     *
+     * 为什么用 `--patch` overlay 而不是改用户自己的 cordis.patch.yml：
+     * overlay 是引擎给调用方的官方入口（`dsh --patch <file>`），用户那份补丁层原样不动。
+     *
+     * ⚠️ 入口名**必须写绝对路径**（v1.2.27 真机事故）：以 `--patch` 插入的条目，其相对名会被
+     * 按「补丁文件所在目录」改写 —— 补丁在 `$DSH_HOME/`、profile 在 `$DSH_HOME/profiles/web/`，
+     * 于是 `./fluid-cloud.mjs` 被解析成 `$DSH_HOME/fluid-cloud.mjs` →
+     * `ERR_MODULE_NOT_FOUND` → 引擎启动即失败 → App 卡在重启循环（日志形如
+     * `failed to import loader entry ... imported from .../profiles/web/`）。
+     *
+     * 注意：入口解析不了会让引擎**启动即失败**（引擎刻意 fail loud），
+     * 所以这里每次启动都重写两份文件，保证内容始终自洽。
+     */
+    private fun applyFluidCloudPlugin(ctx: android.content.Context) {
+        try {
+            val plugin = File(webProfile(ctx), FLUID_CLOUD_PLUGIN)
+            plugin.writeText(fluidCloudPluginJs())
+            fluidCloudPatch(ctx).writeText(
+                "# [dsh-android] 流体云插件补丁层（App 每次启动重写，勿手改）\n" +
+                    "- insert:\n" +
+                    "    - name: ${plugin.absolutePath}\n",
+            )
+            Log.i(TAG, "fluid cloud plugin injected (bridge :$AGENT_BRIDGE_PORT)")
+        } catch (e: Exception) {
+            Log.w(TAG, "fluid cloud plugin: ${e.message}")
+        }
+    }
+
+    private fun fluidCloudPluginJs(): String = """
+        // [dsh-android] 流体云状态上报插件（App 写入，勿手改）
+        // 订阅 agent/status：running = 思考中或跑工具中，idle = 空闲。
+        // 该事件只在状态**变化**时发，所以无需节流。
+        export const name = 'dsh-android-fluid-cloud'
+
+        export function apply(ctx) {
+          const port = $AGENT_BRIDGE_PORT
+          const post = (body) => {
+            fetch('http://127.0.0.1:' + port + '/island', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            }).catch(() => {})
+          }
+          ctx.on('agent/status', (payload) => {
+            const status = payload && payload.status
+            if (status === 'running' || status === 'idle') post({ action: 'status', status })
+          })
+          // 引擎刚起来时必然空闲：先报一次，免得上一次崩溃前留下的"工作中"卡在岛上
+          post({ action: 'status', status: 'idle' })
+        }
+    """.trimIndent() + "\n"
+
     private const val TAG = "EngineConfig"
+
+    /** 引擎侧插件文件名（相对 profile 目录）；用 .mjs 让 Node 直接按 ESM 加载，免掉 module-type 警告 */
+    private const val FLUID_CLOUD_PLUGIN = "fluid-cloud.mjs"
 }
