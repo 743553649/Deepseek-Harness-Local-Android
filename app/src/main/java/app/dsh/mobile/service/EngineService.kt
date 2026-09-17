@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import app.dsh.mobile.DshApp
+import app.dsh.mobile.LiveUpdateProbe
 import app.dsh.mobile.MainActivity
 import app.dsh.mobile.R
 import app.dsh.mobile.engine.EngineSupervisor
@@ -54,6 +55,9 @@ class EngineService : Service() {
         }
 
         app.supervisor.start(app.appScope)
+
+        // 【一次性探针 · 验证完即删】ColorOS 16 流体云可行性验证
+        LiveUpdateProbe.start(this)
 
         // 状态回写到常驻通知
         if (stateJob == null) {
