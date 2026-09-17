@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import app.dsh.mobile.service.EngineService
 
 /**
  * 流体云状态岛（ColorOS 16 对 Android 16 live update 的叫法）。
@@ -32,7 +34,13 @@ object FluidCloud {
 
     private const val TAG = "FluidCloud"
     private const val CHANNEL_ID = "fluid_cloud"
-    private const val NOTIF_ID = 4242
+
+    /**
+     * 岛通知 id。**它同时就是 EngineService 的前台服务通知**（见 `EngineService.startAsForeground`）：
+     * 前台服务通知由系统托管 —— 进程一被杀系统就撤掉它，不会留下点不掉的僵尸胶囊
+     * （实测坑：普通通知 + ongoing 在 App 被杀后会一直挂在通知栏）。
+     */
+    const val NOTIF_ID = 4242
 
     /** 首帧补刷延迟：给系统留出打 promoted 标志的时间 */
     private const val REFRESH_DELAY_MS = 300L
@@ -121,6 +129,43 @@ object FluidCloud {
         }
     }
 
+    /**
+     * 供 `EngineService.startForeground` 用的首帧岛通知。
+     *
+     * 服务启动时自动层还没算过（要等 5 秒轮询），所以这里按设计文案先给「DSH · 启动中」。
+     * 之后所有更新都走 [render] → `notify(NOTIF_ID)`，**同一个 id** 才能保持"前台服务通知"身份
+     * （换成另一个 id 就退化成普通通知，进程被杀时不会被系统撤掉）。
+     */
+    fun foregroundNotification(ctx: Context): Notification {
+        // startForeground 要求通知渠道**已存在**，否则这条通知根本不显示
+        // （此时还没跑过任何一轮 render，post() 里的建渠道还没执行过）
+        ensureChannel(ctx)
+        return build(ctx, "DSH", "启动中", null, null)
+    }
+
+    /** 建渠道（幂等：同 id 重复创建是 no-op，不会覆盖用户改过的设置） */
+    private fun ensureChannel(ctx: Context) {
+        runCatching {
+            ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "流体云状态", NotificationManager.IMPORTANCE_LOW),
+            )
+        }
+    }
+
+    /** 「退出」按钮：与 EngineService.exitCompletely() 同一个入口（停引擎 + 收岛 + 停服务） */
+    private fun exitAction(ctx: Context): Notification.Action {
+        val exitPending = PendingIntent.getService(
+            ctx, 2,
+            Intent(ctx, EngineService::class.java).setAction(EngineService.ACTION_EXIT),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        return Notification.Action.Builder(
+            Icon.createWithResource(ctx, android.R.drawable.ic_menu_close_clear_cancel),
+            ctx.getString(R.string.notif_action_exit),
+            exitPending,
+        ).build()
+    }
+
     private fun clearAgentLayer() {
         agentTitle = null
         agentCritical = null
@@ -162,11 +207,9 @@ object FluidCloud {
             return false
         }
         return runCatching {
-            val nm = ctx.getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "流体云状态", NotificationManager.IMPORTANCE_LOW),
-            )
-            nm.notify(NOTIF_ID, build(ctx, title, critical, text, percent))
+            ensureChannel(ctx)
+            ctx.getSystemService(NotificationManager::class.java)
+                .notify(NOTIF_ID, build(ctx, title, critical, text, percent))
         }.onFailure { Log.w(TAG, "post failed: ${it.message}") }.isSuccess
     }
 
@@ -191,6 +234,9 @@ object FluidCloud {
             .setOngoing(true)
             // 用户明确要求：锁屏显示全部信息（含具体动作），不做脱敏
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+            // 岛通知同时是前台服务通知 → 通知栏里只有这一条常驻通知，
+            // 所以必须自带「退出」按钮（Termux 同款交互），否则用户无处彻底停止引擎
+            .addAction(exitAction(ctx))
         if (!text.isNullOrEmpty()) builder.setContentText(text)
         if (Build.VERSION.SDK_INT >= 36) {
             val style = Notification.ProgressStyle()

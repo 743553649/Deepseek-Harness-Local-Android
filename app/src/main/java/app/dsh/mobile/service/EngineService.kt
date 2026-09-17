@@ -64,13 +64,31 @@ class EngineService : Service() {
         // 流体云自动层（v1.2.27）：项目名 + 引擎状态 + agent 忙碌状态
         startIslandLoop(app)
 
-        // 状态回写到常驻通知
+        // 状态回写到常驻通知（仅 SDK<36 的老系统；有流体云时同一条通知由岛自己维护）
         if (stateJob == null) {
             stateJob = stateScope.launch {
                 app.supervisor.state.collect { updateNotification(it) }
             }
         }
-        return START_STICKY
+        // 【v1.2.28】不再 START_STICKY：用户手动杀掉 App 后系统会立刻把它拉起来，
+        // 表现就是「杀掉了但流体云胶囊和通知还在」（实测：kill 后 6 秒内进程复活、
+        // 引擎重新 start、岛又贴回来）。用户想要的语义是「杀掉就停」，所以不自动复活，
+        // 需要重启时由用户打开 App（MainActivity → EngineService.start）。
+        return START_NOT_STICKY
+    }
+
+    /**
+     * 从最近任务划掉 / 系统清理任务栈 → 视为用户显式退出（v1.2.28）。
+     *
+     * 不处理的话：进程虽被杀，但通知栏那条 ongoing 通知会留下（用户实测反馈）。
+     * 这里与「退出」按钮走同一个出口，保证「图标没了 = 引擎停了 = 岛收了」三者一致。
+     *
+     * ⚠️ 与「按返回键」区分开：返回键走 MainActivity.moveTaskToBack（只退到后台，
+     * 任务仍留在最近任务里，本回调不触发），所以引擎与流体云继续常驻。
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        exitCompletely()
+        super.onTaskRemoved(rootIntent)
     }
 
     /**
@@ -114,18 +132,42 @@ class EngineService : Service() {
         islandJob = null
         stateScope.cancel()
         FluidCloud.hide(this)
-        (application as DshApp).supervisor.stop()
+        stopEngineAsync()
         super.onDestroy()
+    }
+
+    /**
+     * 退出路径统一走这里停引擎。
+     *
+     * 【实测】引擎「优雅退出」要 **约 8 秒**（它在 flush 会话），而 `EngineSupervisor.stop()`
+     * 内部会 `Thread.sleep` 等它死 —— 放在主线程必然 ANR（实测 ANR 堆栈：
+     * `EngineService.onDestroy → EngineSupervisor.stop → EngineProcess.stop` 的 sleep，
+     * 输入事件等 5 秒超时）。所以 TERM 发出后把「等待」挪到后台协程，UI 立即响应。
+     *
+     * 安全性：`EngineProcess.stop()` 第一件事就是发 SIGTERM（不是先 sleep），
+     * 所以就算本进程随后被杀，引擎也已被通知退出，不会变成霸占 3180 的孤儿进程。
+     */
+    private fun stopEngineAsync() {
+        val app = application as DshApp
+        app.appScope.launch(Dispatchers.IO) {
+            runCatching { app.supervisor.stop() }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startAsForeground() {
-        val notification = buildNotification(getString(R.string.status_starting))
+        // 流体云可用时，前台服务通知**就是岛通知**（同一个 id=4242）：
+        // 前台服务通知由系统托管，进程被杀时自动撤掉 —— 普通通知做不到这点，
+        // 会留下点不掉的僵尸胶囊（用户实测反馈）。老系统退回原有的引擎状态通知。
+        val island = FluidCloud.supported
+        val notification = if (island) FluidCloud.foregroundNotification(this)
+        else buildNotification(getString(R.string.status_starting))
+        val id = if (island) FluidCloud.NOTIF_ID else NOTIF_ID
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
-            startForeground(NOTIF_ID, notification)
+            startForeground(id, notification)
         }
     }
 
@@ -174,6 +216,9 @@ class EngineService : Service() {
     }
 
     private fun updateNotification(state: EngineSupervisor.State) {
+        // 有流体云时，通知栏里那条常驻通知就是岛本身，状态文案由岛自动层维护
+        // （见 startIslandLoop）。这里只服务老系统，避免多出一条重复通知。
+        if (FluidCloud.supported) return
         val text = when (state) {
             is EngineSupervisor.State.Healthy -> getString(R.string.status_healthy)
             is EngineSupervisor.State.Backoff ->
@@ -192,14 +237,16 @@ class EngineService : Service() {
         stateJob = null
         islandJob?.cancel()
         islandJob = null
-        FluidCloud.hide(this)
-        (application as DshApp).supervisor.stop()
+        // 顺序要紧：先撤前台服务通知（岛就是它），再 hide() 兜底。
+        // 反过来会先 cancel 一条仍被前台服务持有的通知 —— 系统会忽略，岛就撤不掉了。
         if (Build.VERSION.SDK_INT >= 33) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
+        FluidCloud.hide(this)
+        stopEngineAsync()
         stopSelf()
     }
 
