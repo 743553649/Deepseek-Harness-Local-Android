@@ -558,3 +558,27 @@
   反过来的话，`cancel()` 的对象仍被前台服务持有 → 系统忽略 → 岛撤不掉。
 - **验证**：杀进程后进程/引擎/通知三者应同时消失；从最近任务划掉后同样；
   `dumpsys notification` 里 `id=4242` 应再无记录、且 `flags` 含 `FOREGROUND_SERVICE`。
+
+### H3. ★★在 Service 回调里同步停引擎 → ANR（引擎优雅退出要 8 秒）
+
+- **现象**：停服务 / 点通知栏「退出」/ 从最近任务划掉 App 时，界面会卡死数秒，
+  随后系统弹「App 无响应」，严重时进程被直接杀死。
+- **根因（实测 ANR 堆栈）**：
+  ```
+  "main" ... Sleeping
+    at java.lang.Thread.sleep(Native method)
+    at app.dsh.mobile.engine.EngineProcess.stop(EngineProcess.kt:110)
+    at app.dsh.mobile.engine.EngineSupervisor.stop(EngineSupervisor.kt:88)
+    at app.dsh.mobile.service.EngineService.onDestroy(EngineService.kt:132)
+  ```
+  `EngineProcess.stop()` 发完 SIGTERM 后会在主线程 `sleep` 轮询等引擎退出（最多 10 秒，
+  超时才 SIGKILL）。而**真机实测引擎优雅退出要 8078 ms**（它在 flush 会话/关连接），
+  主线程被阻塞 5 秒以上即触发输入超时 → ANR。
+- **修法（v1.2.28）**：退出路径（`onDestroy` / `exitCompletely`）改为 `stopEngineAsync()` ——
+  `app.appScope.launch(Dispatchers.IO) { supervisor.stop() }`。
+  安全性依据：`EngineProcess.stop()` **第一件事就是发 SIGTERM**，不是先 sleep，
+  所以即使本进程随后被杀，引擎也已被通知退出，不会留下霸占 3180 的孤儿进程。
+  ⚠️ **热重启路径（`EngineSupervisor.restart`）保持同步**：那里必须等旧引擎死透再 spawn，
+  否则新引擎 EADDRINUSE（见 A1 的无限重启事故），不能一起改成异步。
+- **验证**：`am stopservice` 后界面不再无响应；`logcat -b events | grep am_anr` 无该包记录；
+  `/data/anr/` 不再生成该 pid 的堆栈。

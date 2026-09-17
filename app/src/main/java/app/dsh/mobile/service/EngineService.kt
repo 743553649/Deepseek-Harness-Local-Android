@@ -129,8 +129,26 @@ class EngineService : Service() {
         islandJob = null
         stateScope.cancel()
         FluidCloud.hide(this)
-        (application as DshApp).supervisor.stop()
+        stopEngineAsync()
         super.onDestroy()
+    }
+
+    /**
+     * 退出路径统一走这里停引擎。
+     *
+     * 【实测】引擎「优雅退出」要 **约 8 秒**（它在 flush 会话），而 `EngineSupervisor.stop()`
+     * 内部会 `Thread.sleep` 等它死 —— 放在主线程必然 ANR（实测 ANR 堆栈：
+     * `EngineService.onDestroy → EngineSupervisor.stop → EngineProcess.stop` 的 sleep，
+     * 输入事件等 5 秒超时）。所以 TERM 发出后把「等待」挪到后台协程，UI 立即响应。
+     *
+     * 安全性：`EngineProcess.stop()` 第一件事就是发 SIGTERM（不是先 sleep），
+     * 所以就算本进程随后被杀，引擎也已被通知退出，不会变成霸占 3180 的孤儿进程。
+     */
+    private fun stopEngineAsync() {
+        val app = application as DshApp
+        app.appScope.launch(Dispatchers.IO) {
+            runCatching { app.supervisor.stop() }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -225,7 +243,7 @@ class EngineService : Service() {
             stopForeground(true)
         }
         FluidCloud.hide(this)
-        (application as DshApp).supervisor.stop()
+        stopEngineAsync()
         stopSelf()
     }
 
