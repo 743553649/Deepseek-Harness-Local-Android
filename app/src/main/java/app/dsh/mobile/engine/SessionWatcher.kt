@@ -5,7 +5,7 @@ import java.io.File
 /**
  * 会话活动探测（流体云自动层的数据源）。
  *
- * 只看 `$DSH_HOME/sessions/<项目>/session-*/session.jsonl.zstd` 的**修改时间**：
+ * 只看 `$DSH_HOME/sessions/<项目>/session-<uuid>/session.jsonl.zstd` 的**修改时间**：
  * 不解压、不读内容，所以不绑定引擎的内部数据格式，引擎升级也不会碎。
  *
  * 实测依据（PKX110 / ColorOS 16）：

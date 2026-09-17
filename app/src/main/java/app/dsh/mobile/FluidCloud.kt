@@ -108,6 +108,8 @@ object FluidCloud {
         engineBusy = false
         autoTitle = ""
         autoCritical = ""
+        handler.removeCallbacksAndMessages(null)
+        refreshScheduled = false
         runCatching {
             ctx.getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
         }
@@ -120,46 +122,45 @@ object FluidCloud {
         agentPercent = null
     }
 
-    private fun render(ctx: Context) {
+    /**
+     * 渲染当前状态。
+     *
+     * @param allowRefresh 是否允许"补刷一帧"：补刷那一次必须传 false，
+     *   否则补刷会再次安排补刷 → 每 300ms 无限刷通知（自激循环，实测于首次实现）。
+     */
+    private fun render(ctx: Context, allowRefresh: Boolean = true) {
         if (!supported) return
         val title = agentTitle
-        if (title != null) {
+        val built = if (title != null) {
             post(ctx, title, agentCritical ?: "工作中", agentText, agentPercent)
         } else {
-            post(
-                ctx,
-                autoTitle.ifEmpty { "DSH 就绪" },
-                autoCritical,
-                null,
-                null,
-            )
+            post(ctx, autoTitle.ifEmpty { "DSH 就绪" }, autoCritical, null, null)
         }
+        if (!built || !allowRefresh || refreshScheduled) return
+        // 补刷一帧：首帧常拿不到 promoted 标志（实测），补一次即可上岛
+        refreshScheduled = true
+        handler.postDelayed({
+            refreshScheduled = false
+            render(ctx, allowRefresh = false)
+        }, REFRESH_DELAY_MS)
     }
 
-    private fun post(ctx: Context, title: String, critical: String, text: String?, percent: Int?) {
+    private fun post(ctx: Context, title: String, critical: String, text: String?, percent: Int?): Boolean {
         // Android 13+ 无通知权限时前台服务仍合法，但 notify 不会显示 —— 直接跳过
         if (Build.VERSION.SDK_INT >= 33 &&
             ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
             Log.i(TAG, "no notification permission; island skipped")
-            return
+            return false
         }
-        runCatching {
+        return runCatching {
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "流体云状态", NotificationManager.IMPORTANCE_LOW),
             )
             nm.notify(NOTIF_ID, build(ctx, title, critical, text, percent))
-            // 补刷一帧：首帧常拿不到 promoted 标志（实测），补一次即可上岛
-            if (!refreshScheduled) {
-                refreshScheduled = true
-                handler.postDelayed({
-                    refreshScheduled = false
-                    render(ctx)
-                }, REFRESH_DELAY_MS)
-            }
-        }.onFailure { Log.w(TAG, "post failed: ${it.message}") }
+        }.onFailure { Log.w(TAG, "post failed: ${it.message}") }.isSuccess
     }
 
     private fun build(

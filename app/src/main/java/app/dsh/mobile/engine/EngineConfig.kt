@@ -444,6 +444,6 @@ object EngineConfig {
 
     private const val TAG = "EngineConfig"
 
-    /** 引擎侧插件文件名（相对 profile 目录） */
-    private const val FLUID_CLOUD_PLUGIN = "fluid-cloud.js"
+    /** 引擎侧插件文件名（相对 profile 目录）；用 .mjs 让 Node 直接按 ESM 加载，免掉 module-type 警告 */
+    private const val FLUID_CLOUD_PLUGIN = "fluid-cloud.mjs"
 }

@@ -157,10 +157,20 @@ class EngineProcess private constructor(
             // 完全不读 PORT 环境变量。
             // 血泪事故：共存版只把 PORT 环境变量改成 3180，引擎仍监听默认 3080 →
             // 与官方版抢端口 → EADDRINUSE → 无限重启「进程异常退出」。
-            // `--patch` 是顶层选项，必须排在 `web` 子命令**之前**（v1.2.27 流体云插件补丁层）。
+            //
+            // ⚠️ v1.2.27 实测坑：`--patch` 是**父级**选项，而 `web` 子命令显式拒绝父级选项
+            // （`error: web takes none of parent --profile, --patch, ...` → 引擎根本不启动）。
+            // 所以带补丁时必须换用与 `web` 等价的 `--profile web` 形式。
+            // 补丁文件不存在时保持原来的 `web` 形式（生产已验证过的那条路）。
             var args = mutableListOf("--expose-internals", entryJs.absolutePath)
-            if (patchFile != null) args += listOf("--patch", patchFile.absolutePath)
-            args += listOf("web", "--no-open", "--port", port.toString())
+            args += if (patchFile != null && patchFile.isFile) {
+                listOf(
+                    "--patch", patchFile.absolutePath,
+                    "--profile", "web", "--no-open", "--port", port.toString(),
+                )
+            } else {
+                listOf("web", "--no-open", "--port", port.toString())
+            }
             if (suPath != null) {
                 // Root 整体提权：以 su -c 'exec node ...' 启动。
                 // env 已由调用方按 DSH_ANDROID_PRIV_MODE=ROOT 组装好，su 子进程继承。
