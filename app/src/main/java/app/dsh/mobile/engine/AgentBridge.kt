@@ -307,6 +307,10 @@ document.getElementById('api').textContent = checks.map(function(c){
         if (!FluidCloud.supported) {
             return 200 to """{"ok":false,"error":"需要 Android 16（ColorOS 16）才有流体云"}"""
         }
+        // 用户在设置页关掉了流体云 → 明确回 ok:false，别让 Agent 以为"设置了但没人看见"
+        if (!FluidCloud.enabled(ctx)) {
+            return 200 to """{"ok":false,"error":"流体云已在设置页关闭（设置 → 流体云状态岛）"}"""
+        }
         val obj = runCatching { JSONObject(body) }.getOrNull()
             ?: return 400 to """{"ok":false,"error":"body must be JSON"}"""
         when (obj.optString("action")) {
