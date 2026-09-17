@@ -397,20 +397,25 @@ object EngineConfig {
      * POST 给 App 的能力桥 —— 确定性信号，不看模型脸色。
      *
      * 为什么用 `--patch` overlay 而不是改用户自己的 cordis.patch.yml：
-     * overlay 是引擎给调用方的官方入口（`dsh --patch <file>`）；补丁文件放哪都行，
-     * 入口名按 **profile 目录** 解析（实测），所以插件本体写进 profiles/web/ 即可，
-     * 用户那份补丁层原样不动。
+     * overlay 是引擎给调用方的官方入口（`dsh --patch <file>`），用户那份补丁层原样不动。
+     *
+     * ⚠️ 入口名**必须写绝对路径**（v1.2.27 真机事故）：以 `--patch` 插入的条目，其相对名会被
+     * 按「补丁文件所在目录」改写 —— 补丁在 `$DSH_HOME/`、profile 在 `$DSH_HOME/profiles/web/`，
+     * 于是 `./fluid-cloud.mjs` 被解析成 `$DSH_HOME/fluid-cloud.mjs` →
+     * `ERR_MODULE_NOT_FOUND` → 引擎启动即失败 → App 卡在重启循环（日志形如
+     * `failed to import loader entry ... imported from .../profiles/web/`）。
      *
      * 注意：入口解析不了会让引擎**启动即失败**（引擎刻意 fail loud），
      * 所以这里每次启动都重写两份文件，保证内容始终自洽。
      */
     private fun applyFluidCloudPlugin(ctx: android.content.Context) {
         try {
-            File(webProfile(ctx), FLUID_CLOUD_PLUGIN).writeText(fluidCloudPluginJs())
+            val plugin = File(webProfile(ctx), FLUID_CLOUD_PLUGIN)
+            plugin.writeText(fluidCloudPluginJs())
             fluidCloudPatch(ctx).writeText(
                 "# [dsh-android] 流体云插件补丁层（App 每次启动重写，勿手改）\n" +
                     "- insert:\n" +
-                    "    - name: ./$FLUID_CLOUD_PLUGIN\n",
+                    "    - name: ${plugin.absolutePath}\n",
             )
             Log.i(TAG, "fluid cloud plugin injected (bridge :$AGENT_BRIDGE_PORT)")
         } catch (e: Exception) {
