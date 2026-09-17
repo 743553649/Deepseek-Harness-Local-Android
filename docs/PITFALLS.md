@@ -508,3 +508,53 @@
 - **通用教训**：**`Content-Length` 永远是字节数。** 只要中间经过 `Reader`/`Writer` 这类**字符**
   抽象，就必须自己做字节↔字符的换算，否则"英文测试全过、中文必挂"——这类 bug 的隐蔽性极高。
 
+
+---
+
+## H. 流体云状态岛（ColorOS 16 / Android 16）
+
+### H1. ★Root 模式下引擎写的会话目录 App 读不到 → 岛上的「项目名」退化
+
+- **现象**：岛上长期只显示「DSH · 就绪」，看不到「开发 · 就绪」这类项目名；
+  而把 `$DSH_HOME/sessions/**` 手动 `chown` 给 App 后，6 秒内标题就变回项目名。
+- **根因**：Root 模式下引擎以 **uid 0** 运行，它新建的会话目录是 `drwx------ root root`（0700），
+  而 App 界面进程是 **uid 10491** —— `SessionWatcher`（跑在 App 进程里）读不进去，
+  `project.listFiles()` 返回 null → 该项目被跳过 → 标题退回 `DSH`。
+  注意这不是测试残渣：**引擎每次开新会话都会产生这样的目录**，所以会反复出现。
+- **为什么之前"看起来是好的"**：上个会话清理现场时把那些目录 chown 给了 App，
+  于是一段时间内能正常显示 —— 属于巧合，不是真实状态。
+- **修法（v1.2.28）**：让**引擎侧插件**（`fluid-cloud.mjs`，跑在 root 的引擎进程里）
+  把 `sessions/<项目>/` 与 `sessions/<项目>/<会话>/` **两级目录** `chmod 0755`；
+  每 3 秒一次 + 每次 `agent/status` 事件一次。
+  App 只做 `list` + `stat`（`SessionWatcher` 明确"不解压不读内容"），
+  所以**文件本身保持 0600 不用动**，安全面不变（父目录仍是 App 私有的 0700）。
+- **验证**：以 App 身份实测 —— 改权限前 `su 10491 -c "ls <项目目录>"` → `Permission denied`；
+  改后能列出会话目录、能 `stat` 到 `session*.zstd` 的 mtime；岛上标题 6 秒内变为项目名。
+- **通用教训**：**跨 uid 的"只读对方数据"要按最小权限设计**：
+  先问清楚"我到底需要目录的什么"（这里是"列目录 + stat 文件 mtime"），
+  往往只需要目录的执行/读位，不必把文件本身也开放。
+
+### H2. ★★普通 ongoing 通知不随进程死亡消失；`START_STICKY` 还会让 App 自己复活
+
+- **现象（用户反馈）**：手动把 Dev 版 App 杀掉后，流体云胶囊和通知栏那条通知都还在。
+- **根因（实测两段，缺一不可）**：
+  1. 岛通知原来是**普通通知** + `setOngoing(true)`：Android 只保证"用户划不掉"，
+     **不保证进程死后撤掉** —— 它就此变成点不掉的僵尸胶囊；
+     只有**前台服务通知**（`startForeground` 的那条）才由系统托管、随进程死亡被撤。
+  2. 更主要的一条：`EngineService` 返回 `START_STICKY`，前台服务被杀后**系统会立刻把它拉起来**
+     → 引擎重新启动 → 岛又被贴回来。实测：`kill -9 <app pid>` 后 6 秒内进程 PID 已变
+     （8051 → 18958）、`engine.log` 多出一条 `---- engine start ----`、
+     通知的 `when` 是**新发**的时间戳（不是旧通知没撤）。
+- **修法（v1.2.28）**：
+  1. 岛通知**就当前台服务通知**（`EngineService.startAsForeground` 用 `FluidCloud.NOTIF_ID`
+     和 `FluidCloud.foregroundNotification()`；后续更新仍是同一个 id → 保持前台服务身份）。
+     ⚠️ `startForeground` 要求渠道**已存在**，所以建渠道必须提前到 `foregroundNotification()` 里，
+     不能只在 `post()` 里建。
+  2. `START_STICKY` → **`START_NOT_STICKY`**：用户杀掉就停，不自我复活。
+  3. 加 `onTaskRemoved()` → 与通知栏「退出」按钮同一个出口
+     （收岛 + 停引擎 + `stopSelf`）。副作用：**按返回键退出 App 也会停引擎**，
+     按 Home 键退到后台不受影响。
+- **顺序坑**：`exitCompletely()` 必须**先** `stopForeground(STOP_FOREGROUND_REMOVE)` **再** `hide()`；
+  反过来的话，`cancel()` 的对象仍被前台服务持有 → 系统忽略 → 岛撤不掉。
+- **验证**：杀进程后进程/引擎/通知三者应同时消失；从最近任务划掉后同样；
+  `dumpsys notification` 里 `id=4242` 应再无记录、且 `flags` 含 `FOREGROUND_SERVICE`。
