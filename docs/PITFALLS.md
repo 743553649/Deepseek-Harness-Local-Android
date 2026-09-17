@@ -658,3 +658,48 @@
 - **验证**：制造残留（手动留一个 engine node）后重启引擎，日志应出现
   `EADDRINUSE: killed orphan engine node(s) of app.dsh.mobile.dev`，且**官方版引擎 PID 不变**；
   随后只应有 **1 个** dev 引擎进程（`ps` 核对）。
+
+### H6. ★Agent 忘了调 `island done` → 岛上一直挂着过期进度（需要 TTL 回落）
+
+- **现象**：Agent 用 `island set "正在改 X" 60` 报了进度后没有收尾，任务早就结束了，
+  岛上仍长期显示「正在改 X · 60%」——**岛上在说谎**，用户以为还在跑。
+- **根因**：三层优先级里 Agent 层的清除时机只有"下一次任务开始"（`agent/status=running`）
+  和显式 `island clear/done`。Agent 漏调就永远没人清（实测确认无任何自动回落）。
+  设计上「✓ 完成」需要常驻（那是刻意的），但**进行中的进度**不该无限期挂着。
+- **修法（v1.2.28）**：`FluidCloud.expireStaleAgent()`，由 EngineService 的 5 秒自动层轮询调用：
+  **引擎空闲 + 距上次 Agent 上报超过 10 分钟** → 撤掉 Agent 层回落到自动层。
+  `report()`/`done()` 记录单调时钟；「✓ 完成」用 `agentIsDone` 标记排除在过期之外。
+- **验证**：`island set "TTL 过期测试" 66` 后干等 10 分钟（引擎空闲）→ 岛上应自动回到
+  「项目名 · 就绪」；期间若跑任务或再上报则不回落（有更新就续期）。
+
+### H7. 开关与"无权限"的边界：岛通知既是前台服务通知，就有一条容易踩的路径
+
+- **背景**：v1.2.28 起岛通知**就是**前台服务通知（H2）。于是"用户关掉流体云"和
+  "系统不支持/没权限"都必须能干净地退回普通前台通知，否则服务会没有合法通知可用。
+- **坑（合并时引入、本次修掉）**：Android 13+ 若没授予 `POST_NOTIFICATIONS`，
+  `notify()` 会被系统丢弃，而 `startForeground()` 的首帧通知**已经贴出去了** →
+  岛会**永久停在「DSH · 启动中」**（内容再也更新不了）。
+  → 修法：`EngineService.useIslandNotification()` 三条件缺一不可
+  （系统支持 + 用户开关开 + 有通知权限）；不满足就退回老的引擎状态通知。
+- **开关实现要点（设置页「流体云状态岛」）**：
+  1. 偏好放 `dsh_ui`，key `island_enabled`（默认开）；
+     常量由 `FluidCloud.PREFS_UI/KEY_ISLAND_ENABLED` 提供，避免多处字面量。
+  2. 切换后**不重启引擎** —— 只发 `ACTION_REFRESH_NOTIFICATION` 让服务重挂通知；
+     `EngineService.refreshNotificationIfRunning()` 在**服务没跑时什么都不做**，
+     否则"改个开关"会把引擎拉起来（用户会莫名看到引擎启动）。
+  3. `startAsForeground()` 换风格时顺手 `cancel` 另一条 id，避免留下两条常驻通知。
+  4. 系统不支持（< Android 16）时设置页整行置灰，不给一个点了没反应的开关。
+  5. `/island` 在开关关闭时明确回 `ok:false`，别让 Agent 以为"设置了但没人看见"。
+- **验证**：偏好写 `false` → 重启 App → 应**只有** `id=42` 的「DSH 引擎运行中」普通通知，
+  `id=4242` 与 `PROMOTED_ONGOING` 都不出现；写回 `true` → 岛回来。
+  撤掉 `POST_NOTIFICATIONS` 后重启 → 岛上不该出现任何卡住的内容。
+
+### H5 补充：EADDRINUSE 判定还必须**只看本轮新增日志**
+
+- 修掉"哈希 vs 字符串"之后还有个坑：日志是**追加**的，旧一轮失败留下的 `EADDRINUSE`
+  会一直待在 `takeLast(4096)` 窗口里 → **每一轮都被判成端口冲突**，于是反复 `pkill -9`、
+  反复把退避清零（实测：一次与端口无关的引擎崩溃也触发了清孤儿，还误杀了我的调试 shell）。
+- 修法：`supervisionLoop` 每轮开始时记 `logMark = logFile().length()`，
+  判定改用 `logTextSince(logMark)`（日志泵 2MB 环形截断导致 mark 失效时退回尾部窗口）。
+- 验证：连杀引擎两次（不产生 EADDRINUSE）→ 日志里**不应出现**
+  `EADDRINUSE: killed orphan engine node(s)`；制造真冲突时才出现。

@@ -15,6 +15,7 @@ import android.widget.Toast
 import app.dsh.mobile.engine.ExtensionManager
 import app.dsh.mobile.engine.PrivMode
 import app.dsh.mobile.engine.Privilege
+import app.dsh.mobile.service.EngineService
 
 /**
  * 独立设置页（MIUI 分组卡片风格，替代原先的悬浮菜单）。
@@ -71,6 +72,14 @@ class SettingsActivity : Activity() {
             showPrivDialog()
         }
 
+        // —— 显示：流体云状态岛开关（系统不支持时置灰，别给个点了没反应的开关） ——
+        val rowIsland = findViewById<LinearLayout>(R.id.rowIsland)
+        if (FluidCloud.supported) {
+            rowIsland.setOnClickListener { toggleIsland() }
+        } else {
+            rowIsland.alpha = 0.35f
+        }
+
         // —— 权限中心：屏幕点击（无障碍） ——
         findViewById<LinearLayout>(R.id.rowAccess).setOnClickListener {
             handleAccessibility()
@@ -122,6 +131,7 @@ class SettingsActivity : Activity() {
             if (landscape) R.string.setting_orient_landscape else R.string.setting_orient_portrait
         )
         findViewById<TextView>(R.id.valScale).text = "$pageScale%"
+        findViewById<TextView>(R.id.valIsland).text = islandLabel()
         findViewById<TextView>(R.id.valPriv).text = privLabel(Privilege.getMode(this))
         findViewById<TextView>(R.id.valRootStatus).let {
             val rootOk = Privilege.rootAvailableMinimal()
@@ -194,6 +204,31 @@ class SettingsActivity : Activity() {
         findViewById<TextView>(R.id.valLandscape).text = getString(
             if (landscape) R.string.setting_orient_landscape else R.string.setting_orient_portrait
         )
+    }
+
+    // ================= 显示：流体云状态岛 =================
+
+    /**
+     * 流体云开关（默认开）。落库后让常驻服务**立刻换通知风格**（岛 ↔ 普通前台通知），
+     * **不重启引擎** —— 开关不该打断正在跑的会话。
+     * 服务没在跑时不发意图（免得"改个开关把引擎拉起来"），只提示下次启动生效。
+     */
+    private fun toggleIsland() {
+        val on = !FluidCloud.enabled(this)
+        getSharedPreferences(PREFS_UI, MODE_PRIVATE)
+            .edit().putBoolean(FluidCloud.KEY_ISLAND_ENABLED, on).apply()
+        findViewById<TextView>(R.id.valIsland).text = islandLabel()
+        if (!on) FluidCloud.hide(this)   // 关掉时立刻收岛；开着时由服务重新挂上
+        if (!EngineService.refreshNotificationIfRunning(this)) {
+            Toast.makeText(this, getString(R.string.setting_island_idle_hint), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 右侧当前值：系统不支持 → 灰置文案；否则 开/关 */
+    private fun islandLabel(): String = when {
+        !FluidCloud.supported -> getString(R.string.setting_island_unsupported)
+        FluidCloud.enabled(this) -> getString(R.string.setting_island_on)
+        else -> getString(R.string.setting_island_off)
     }
 
     // ================= 显示：页面缩放 =================

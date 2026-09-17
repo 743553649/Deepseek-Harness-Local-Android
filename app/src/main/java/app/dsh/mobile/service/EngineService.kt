@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -47,6 +48,11 @@ class EngineService : Service() {
         // 通知栏「退出」按钮：用户显式要求彻底停止（Termux 同款交互）
         if (intent?.action == ACTION_EXIT) {
             exitCompletely()
+            return START_NOT_STICKY
+        }
+        // 设置页改了「流体云开关」→ 只把前台通知换一种风格，**不重启引擎**
+        if (intent?.action == ACTION_REFRESH_NOTIFICATION) {
+            startAsForeground()
             return START_NOT_STICKY
         }
 
@@ -108,18 +114,37 @@ class EngineService : Service() {
                     runCatching { watcher.snapshot() }.getOrNull()
                 }
                 val project = when {
-                    snapshot == null -> "DSH"
-                    snapshot.activeProjects > 1 -> "${snapshot.activeProjects} 个项目"
-                    else -> snapshot.project ?: "DSH"
+                    snapshot == null -> getString(R.string.island_dsh)
+                    snapshot.activeProjects > 1 ->
+                        getString(R.string.island_projects, snapshot.activeProjects)
+                    else -> snapshot.project ?: getString(R.string.island_dsh)
                 }
                 when (app.supervisor.state.value) {
                     // 忙碌词交给 FluidCloud 拼：agent/status 一到就立刻反映，不必等这轮轮询
                     is EngineSupervisor.State.Healthy ->
-                        FluidCloud.setAuto(this@EngineService, project, "就绪", "工作中")
+                        FluidCloud.setAuto(
+                            this@EngineService, project,
+                            getString(R.string.island_ready), getString(R.string.island_busy),
+                        )
                     is EngineSupervisor.State.Backoff, is EngineSupervisor.State.Failed ->
-                        FluidCloud.setAuto(this@EngineService, "DSH", "引擎异常")
-                    else -> FluidCloud.setAuto(this@EngineService, "DSH", "启动中")
+                        FluidCloud.setAuto(
+                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_error),
+                        )
+                    // Installing / Starting：本身看不出"首次启动"还是"崩溃后重启"，
+                    // 而 Backoff 只存在 2 秒就被这两个状态覆盖 —— 真机上引擎反复崩，
+                    // 岛却一直说「启动中」，用户以为一切正常（实测）。连续失败 ≥2 次就报异常。
+                    else -> if (app.supervisor.lastBackoffAttempt >= 2) {
+                        FluidCloud.setAuto(
+                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_error),
+                        )
+                    } else {
+                        FluidCloud.setAuto(
+                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_starting),
+                        )
+                    }
                 }
+                // Agent 忘了调 island done 时别让「60%」一直挂着（引擎空闲 + 10 分钟无更新 → 回自动层）
+                FluidCloud.expireStaleAgent(this@EngineService)
                 delay(ISLAND_INTERVAL_MS)
             }
         }
@@ -154,11 +179,26 @@ class EngineService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * 是否用「岛通知」当前台服务通知（而不是老的引擎状态通知）。三个条件缺一不可：
+     *  1. 系统支持（Android 16 / ColorOS 16 才有 ProgressStyle）
+     *  2. 设置页开关是开的（用户要求可关；关掉后回到普通前台通知）
+     *  3. 通知权限已授予 —— Android 13+ 无权限时 `notify()` 会被系统丢弃，
+     *     岛内容会**永远停在首帧「DSH · 启动中」**（代码路径如此），这种宁可不上岛。
+     */
+    private fun useIslandNotification(): Boolean {
+        if (!FluidCloud.active(this)) return false
+        return if (Build.VERSION.SDK_INT >= 33) {
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } else true
+    }
+
     private fun startAsForeground() {
         // 流体云可用时，前台服务通知**就是岛通知**（同一个 id=4242）：
         // 前台服务通知由系统托管，进程被杀时自动撤掉 —— 普通通知做不到这点，
-        // 会留下点不掉的僵尸胶囊（用户实测反馈）。老系统退回原有的引擎状态通知。
-        val island = FluidCloud.supported
+        // 会留下点不掉的僵尸胶囊（用户实测反馈）。其余情况退回原有的引擎状态通知。
+        val island = useIslandNotification()
         val notification = if (island) FluidCloud.foregroundNotification(this)
         else buildNotification(getString(R.string.status_starting))
         val id = if (island) FluidCloud.NOTIF_ID else NOTIF_ID
@@ -166,6 +206,10 @@ class EngineService : Service() {
             startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(id, notification)
+        }
+        // 换风格时把另一条撤掉，别留两条常驻通知
+        runCatching {
+            getSystemService(NotificationManager::class.java).cancel(if (island) NOTIF_ID else FluidCloud.NOTIF_ID)
         }
     }
 
@@ -214,9 +258,9 @@ class EngineService : Service() {
     }
 
     private fun updateNotification(state: EngineSupervisor.State) {
-        // 有流体云时，通知栏里那条常驻通知就是岛本身，状态文案由岛自动层维护
-        // （见 startIslandLoop）。这里只服务老系统，避免多出一条重复通知。
-        if (FluidCloud.supported) return
+        // 用岛通知时，常驻通知就是岛本身，文案由岛自动层维护（见 startIslandLoop）；
+        // 这里只服务"没上岛"的情况（老系统 / 开关关闭 / 无通知权限），避免多出一条重复通知。
+        if (useIslandNotification()) return
         val text = when (state) {
             is EngineSupervisor.State.Healthy -> getString(R.string.status_healthy)
             is EngineSupervisor.State.Backoff ->
@@ -258,9 +302,28 @@ class EngineService : Service() {
         /** 通知「退出」按钮触发动作 */
         const val ACTION_EXIT = "app.dsh.mobile.service.action.EXIT"
 
+        /** 设置页改了流体云开关后，让常驻通知换风格（不重启引擎） */
+        const val ACTION_REFRESH_NOTIFICATION = "app.dsh.mobile.service.action.REFRESH_NOTIFICATION"
+
         /** 便捷启动入口（供 Activity 调用） */
         fun start(context: Context) {
             context.startForegroundService(Intent(context, EngineService::class.java))
+        }
+
+        /**
+         * 流体云开关切换后调用。**只在服务已在跑时才发意图** —— 否则"改个开关"
+         * 会把前台服务（进而引擎）一起拉起来，用户会莫名其妙看到引擎启动。
+         * @return 是否已发出刷新意图
+         */
+        fun refreshNotificationIfRunning(context: Context): Boolean {
+            val app = context.applicationContext as? DshApp ?: return false
+            if (!app.supervisor.running) return false
+            return runCatching {
+                context.startService(
+                    Intent(context, EngineService::class.java).setAction(ACTION_REFRESH_NOTIFICATION),
+                )
+                true
+            }.getOrDefault(false)
         }
     }
 }

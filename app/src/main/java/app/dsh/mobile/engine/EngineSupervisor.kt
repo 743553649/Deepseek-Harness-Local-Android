@@ -76,6 +76,17 @@ class EngineSupervisor(private val ctx: Context) {
     private val guardian by lazy { ProfileGuardian(ctx) }
 
     /**
+     * 最近一次退避重启的序号（0 = 本轮没失败过；健康后清零）。
+     *
+     * 给 UI 用：`Installing` / `Starting` 这两个状态本身看不出"是首次启动还是崩溃后重启"，
+     * 而真机上崩溃重启时岛上会一直显示「启动中」（Backoff 只存在 2 秒就被覆盖），
+     * 用户根本察觉不到引擎在反复崩。有了这个值就能区分并显示「引擎异常」。
+     */
+    @Volatile
+    var lastBackoffAttempt: Int = 0
+        private set
+
+    /**
      * 监督代际：每次 start/stop 递增。
      *
      * 作用：让**被取代的旧监督循环**彻底闭嘴。`loopJob.cancel()` 只能取消挂起点，
@@ -140,6 +151,12 @@ class EngineSupervisor(private val ctx: Context) {
         start(scope)
     }
 
+    /**
+     * 监督循环是否在跑（≈ 常驻服务在跑）。
+     * 设置页改流体云开关时用它判断要不要立刻刷新通知 —— 服务没跑就别发意图，否则会把引擎拉起来。
+     */
+    val running: Boolean get() = loopJob?.isActive == true
+
     /** 手动导出引擎日志（用户反馈通道） */
     fun logFile(): File = File(EngineConfig.engineRoot(ctx), "engine.log")
 
@@ -150,6 +167,30 @@ class EngineSupervisor(private val ctx: Context) {
      * 于是清孤儿的兜底是**死代码**，从来没生效过（真机实测：残留引擎霸占 3180 后反复 spawn 撞车）。
      */
     private fun logTailText(): String = runCatching { logFile().readText().takeLast(4096) }.getOrDefault("")
+
+    /**
+     * **本轮新增**的引擎日志（从 mark 偏移开始）。
+     *
+     * 为什么不能直接看尾部 4KB：日志是追加的，旧的一轮失败留下的 `EADDRINUSE` 会一直待在
+     * 尾部窗口里 → 每一轮都被判定为"端口冲突"，于是反复 `pkill -9`、反复把退避清零（实测）。
+     * 判定必须只看本轮。
+     *
+     * @param mark 本轮开始时的日志长度（见 supervisionLoop 里的 logMark）。
+     *   注意日志泵会做 2MB 环形截断（重写文件）→ mark 失效时退回尾部窗口，宁可多判也不少判。
+     */
+    private fun logTextSince(mark: Long): String = runCatching {
+        val f = logFile()
+        val len = f.length()
+        val from = if (mark in 0..len) mark else (len - 4096).coerceAtLeast(0)
+        if (len <= from) return@runCatching ""
+        java.io.RandomAccessFile(f, "r").use { raf ->
+            raf.seek(from)
+            val n = (len - from).coerceAtMost(128 * 1024).toInt()
+            val buf = ByteArray(n)
+            raf.readFully(buf)
+            String(buf, Charsets.UTF_8)
+        }
+    }.getOrDefault("")
 
     /**
      * 失败签名：用「引擎日志尾部 + 退出码」的哈希近似。
@@ -182,6 +223,8 @@ class EngineSupervisor(private val ctx: Context) {
             // 本轮引擎是否真的死了（启动期死 / 健康后退出都算）。EADDRINUSE 判定用它，
             // 避免拿陈年日志误判成"端口又冲突了"。
             var engineDied = false
+            // 本轮开始的日志位置：EADDRINUSE 判定只看这之后新增的内容（否则陈年错误会反复触发）
+            val logMark = runCatching { logFile().length() }.getOrDefault(0L)
             try {
                 // 启动前先把被误隔离的引擎内置 patch 恢复（自愈；防 ENOENT fail-loud）
                 val healed = withContext(Dispatchers.IO) { guardian.restoreQuarantinedBuiltinOverlays() }
@@ -236,6 +279,7 @@ class EngineSupervisor(private val ctx: Context) {
                         guardian.snapshotLastGood()
                     }
                     backoffIndex = 0
+                    lastBackoffAttempt = 0   // 健康 → 清零，重新开始数
                     val safe = guardian.inSafeMode()
                     // 0.1.5+：HTTP 监听先于 WebUI 就绪（裸 / 也能应答 401，健康检查
                     // 探到即过），带 token 的入口行要等插件树加载完才打印 ——
@@ -283,7 +327,7 @@ class EngineSupervisor(private val ctx: Context) {
             // ⚠️ 判定必须看**日志原文**：`failureSignature` 返回的是哈希字符串
             // （"$status:${hashCode}"），早期直接拿它 `.contains("EADDRINUSE")` →
             // 这个兜底**从来没生效过**（真机实测：反复 spawn 撞车、引擎进程越攒越多）。
-            if (engineDied && logTailText().contains("EADDRINUSE")) {
+            if (engineDied && logTextSince(logMark).contains("EADDRINUSE")) {
                 val su = Privilege.findSu()
                 if (su != null) {
                     // 模式**按包名限定**：官方版与本版共存时，裸 'files/engine/bin/node'
@@ -325,6 +369,7 @@ class EngineSupervisor(private val ctx: Context) {
                 (backoffIndex - 1).coerceAtMost(EngineConfig.BACKOFF_STEPS.size - 1)
             ]
             _state.value = State.Backoff(delayMs, backoffIndex)
+            lastBackoffAttempt = backoffIndex   // 供 UI 区分「首次启动」与「反复失败后重启」
             delay(delayMs)
         }
     }

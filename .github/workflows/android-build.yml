@@ -172,6 +172,10 @@ jobs:
       - name: 打印签名密钥指纹（跨构建应完全一致）
         run: sha256sum .ci/debug.keystore
 
+      # 纯逻辑单测（JVM，不需要设备）：会话目录名解码 / 会话文件名版本差异等回归网
+      - name: 单元测试（${{ matrix.abi }}）
+        run: gradle -p . testDebugUnitTest -Pabi=${{ matrix.abi }} --stacktrace
+
       - name: 构建 APK（${{ matrix.abi }}）
         run: gradle -p . assembleDebug -Pabi=${{ matrix.abi }} --stacktrace
 

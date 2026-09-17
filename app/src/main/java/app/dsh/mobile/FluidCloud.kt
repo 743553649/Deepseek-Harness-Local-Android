@@ -45,8 +45,29 @@ object FluidCloud {
     /** 首帧补刷延迟：给系统留出打 promoted 标志的时间 */
     private const val REFRESH_DELAY_MS = 300L
 
+    /**
+     * Agent 上报层的过期时间：引擎空闲且这么久没有新的上报 → 撤掉上报层回到自动层。
+     *
+     * 为什么需要：Agent 忘了调 `island done` 时，岛上会**一直挂着「正在改 X · 60%」**
+     * 直到下一次任务开始 —— 任务早就结束了，岛上却在说谎（真机风险，实测确认无自动回落）。
+     * 「✓ 完成」不参与过期（按设计它要留到下一次任务开始）。
+     */
+    private const val AGENT_TTL_MS = 10 * 60 * 1000L
+
+    /** 设置页开关所在的偏好文件与 key（SettingsActivity 直接引用这两个常量，避免字面量重复） */
+    const val PREFS_UI = "dsh_ui"
+    const val KEY_ISLAND_ENABLED = "island_enabled"
+
     /** Android 16（API 36）才有 ProgressStyle / setShortCriticalText；更老的系统整块功能静默降级 */
     val supported: Boolean get() = Build.VERSION.SDK_INT >= 36
+
+    /** 用户在设置页的开关（默认开）。关掉后回到普通前台通知，不再上岛。 */
+    fun enabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ISLAND_ENABLED, true)
+
+    /** 实际是否启用：系统支持 **且** 用户没关 */
+    fun active(ctx: Context): Boolean = supported && enabled(ctx)
 
     /** 引擎插件上报的忙碌状态（思考中/执行中） */
     @Volatile private var engineBusy = false
@@ -56,6 +77,10 @@ object FluidCloud {
     private var agentCritical: String? = null
     private var agentText: String? = null
     private var agentPercent: Int? = null
+
+    /** Agent 层的最后更新时间（单调时钟）与"是否为完成态"，用于过期回落 */
+    private var agentUpdatedAt = 0L
+    private var agentIsDone = false
 
     /** 自动层文案（项目名 + 状态词），由 EngineService 定期写入 */
     private var autoTitle: String = ""
@@ -97,16 +122,34 @@ object FluidCloud {
         agentTitle = title
         agentText = text
         agentPercent = percent
-        agentCritical = percent?.let { "$it%" } ?: "工作中"
+        agentCritical = percent?.let { "$it%" } ?: ctx.getString(R.string.island_busy)
+        agentUpdatedAt = android.os.SystemClock.elapsedRealtime()
+        agentIsDone = false
         render(ctx)
     }
 
     /** Agent 显式收尾（`island done`）→ 常驻「✓ 完成」直到下一次任务开始 */
     fun done(ctx: Context, text: String?) {
-        agentTitle = "✓ 完成"
+        agentTitle = ctx.getString(R.string.island_done)
         agentText = text
         agentPercent = null
-        agentCritical = "完成"
+        agentCritical = ctx.getString(R.string.island_done_short)
+        agentUpdatedAt = android.os.SystemClock.elapsedRealtime()
+        agentIsDone = true
+        render(ctx)
+    }
+
+    /**
+     * 过期回落（由 EngineService 的 5 秒轮询调用）：Agent 忘了 `island done` 时，
+     * 岛上会一直挂着「正在改 X · 60%」直到下一次任务 —— 任务早结束了却在说谎（实测风险）。
+     * 规则：引擎空闲 + 距上次上报超过 [ttlMs] → 撤掉上报层，回到自动层。
+     * 「✓ 完成」按设计不参与过期（它要留到下一次任务开始）。
+     */
+    fun expireStaleAgent(ctx: Context, ttlMs: Long = AGENT_TTL_MS) {
+        if (agentTitle == null || agentIsDone || engineBusy) return
+        if (android.os.SystemClock.elapsedRealtime() - agentUpdatedAt < ttlMs) return
+        Log.i(TAG, "agent layer stale > ${ttlMs / 60_000}min with engine idle; falling back to auto layer")
+        clearAgentLayer()
         render(ctx)
     }
 
@@ -140,7 +183,7 @@ object FluidCloud {
         // startForeground 要求通知渠道**已存在**，否则这条通知根本不显示
         // （此时还没跑过任何一轮 render，post() 里的建渠道还没执行过）
         ensureChannel(ctx)
-        return build(ctx, "DSH", "启动中", null, null)
+        return build(ctx, ctx.getString(R.string.island_dsh), ctx.getString(R.string.island_starting), null, null)
     }
 
     /** 建渠道（幂等：同 id 重复创建是 no-op，不会覆盖用户改过的设置） */
@@ -171,6 +214,7 @@ object FluidCloud {
         agentCritical = null
         agentText = null
         agentPercent = null
+        agentIsDone = false
     }
 
     /**
@@ -180,13 +224,14 @@ object FluidCloud {
      *   否则补刷会再次安排补刷 → 每 300ms 无限刷通知（自激循环，实测于首次实现）。
      */
     private fun render(ctx: Context, allowRefresh: Boolean = true) {
-        if (!supported) return
+        // active = 系统支持 + 设置页开关打开；关掉后这里不再动通知（服务改用普通前台通知）
+        if (!active(ctx)) return
         val title = agentTitle
         val built = if (title != null) {
-            post(ctx, title, agentCritical ?: "工作中", agentText, agentPercent)
+            post(ctx, title, agentCritical ?: ctx.getString(R.string.island_busy), agentText, agentPercent)
         } else {
             val word = if (engineBusy) autoBusyWord ?: autoIdleWord else autoIdleWord
-            post(ctx, autoTitle.ifEmpty { "DSH 就绪" }, word, null, null)
+            post(ctx, autoTitle.ifEmpty { ctx.getString(R.string.island_fallback) }, word, null, null)
         }
         if (!built || !allowRefresh || refreshScheduled) return
         // 补刷一帧：首帧常拿不到 promoted 标志（实测），补一次即可上岛
