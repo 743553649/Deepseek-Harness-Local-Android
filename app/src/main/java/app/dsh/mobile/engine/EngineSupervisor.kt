@@ -75,19 +75,58 @@ class EngineSupervisor(private val ctx: Context) {
     private var scopeRef: CoroutineScope? = null
     private val guardian by lazy { ProfileGuardian(ctx) }
 
+    /**
+     * 监督代际：每次 start/stop 递增。
+     *
+     * 作用：让**被取代的旧监督循环**彻底闭嘴。`loopJob.cancel()` 只能取消挂起点，
+     * 若旧循环正阻塞在 `proc.exitFuture.get()`（不可取消），它会一直等到引擎退出才返回，
+     * 此时若已有一轮新 start()（`userStop` 已被置回 false），旧循环就会继续往下走 ——
+     * 状态被它写回 Backoff、甚至再拉起一个引擎（真机竞态，v1.2.28 修）。
+     */
+    private var epoch = 0
+
     fun start(scope: CoroutineScope) {
         scopeRef = scope
         if (loopJob?.isActive == true) return
+        val token = ++epoch
         userStop = false
-        loopJob = scope.launch(Dispatchers.Default) { supervisionLoop() }
+        loopJob = scope.launch(Dispatchers.Default) { supervisionLoop(token) }
     }
 
     fun stop() {
+        epoch++
         userStop = true
         loopJob?.cancel()
         process?.stop()
         process = null
         _state.value = State.Stopped
+    }
+
+    /**
+     * 退出专用（v1.2.28）：**不为等引擎死而阻塞调用线程**（实测优雅退出要 8 秒，
+     * 在 Service 回调里同步等会 ANR）。
+     *
+     * ⚠️ 关键设计：**状态变更与阻塞等待必须分离**。
+     * `process = null` / `state = Stopped` 立即完成；后台协程只对**快照到的那个进程**
+     * 做 TERM→等待→兜底 KILL，**不再碰任何共享状态**。
+     *
+     * 曾经写错成「整个 stop() 丢到后台线程」，结果踩到竞态（真机实测）：
+     * 用户在 8 秒停止窗口内重新打开 App → 新的监督循环刚起来就被迟到的 `stop()`
+     * 取消、状态被打回 `Stopped` → 引擎还在跑但没人监督，岛上永远停在「启动中」。
+     *
+     * 残留风险与兜底：旧引擎可能还占着端口，新循环启动时若撞上 EADDRINUSE，
+     * 监督循环已有专门的处置（用 su 清残留 node 后重试，见 supervisionLoop 的
+     * `deterministicFailure.contains("EADDRINUSE")` 分支）。
+     */
+    fun stopAsync(scope: CoroutineScope) {
+        epoch++
+        userStop = true
+        loopJob?.cancel()
+        loopJob = null
+        val dying = process
+        process = null
+        _state.value = State.Stopped
+        scope.launch(Dispatchers.IO) { runCatching { dying?.stop() } }
     }
 
     /**
@@ -124,9 +163,11 @@ class EngineSupervisor(private val ctx: Context) {
         return "$status:${tail.hashCode()}"
     }
 
-    private suspend fun supervisionLoop() {
+    private suspend fun supervisionLoop(token: Int) {
         var backoffIndex = 0
-        while (kotlinx.coroutines.currentCoroutineContext().isActive && !userStop) {
+        // token != epoch 表示这一轮监督已被 stop/restart 取代 → 立刻收工：
+        // 绝不再写状态，更不再拉引擎（否则会出现"两个引擎抢 3180"）
+        while (kotlinx.coroutines.currentCoroutineContext().isActive && !userStop && token == epoch) {
             // 仅当引擎「自行死亡」（fork 失败 / 启动期退出）才值得让 guardian 定罪；
             // 健康超时自杀、安装异常、Healthy 后运行中退出都不算配置崩溃。
             var deterministicFailure: String? = null
@@ -192,8 +233,10 @@ class EngineSupervisor(private val ctx: Context) {
                     }
                     // 阻塞等待进程退出（被杀/崩溃）。Healthy 后退出视为资源类偶发，
                     // 不计入 guardian（那是普通退避该管的事，与配置无关）。
+                    // ⚠️ 这个 get() 不可取消：若期间发生过 stop/restart（token 已过期），
+                    // 就在这里收工，别把状态写回 Backoff、更别又拉一个引擎起来。
                     val status = proc.exitFuture.get()
-                    if (userStop) break
+                    if (userStop || token != epoch) break
                     Log.w(TAG, "engine exited, raw status=0x${status.toString(16)}")
                 } else if (proc.exitFuture.isDone) {
                     // 启动期内进程自己死了——唯一进入自愈判定的信号

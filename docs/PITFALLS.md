@@ -608,3 +608,27 @@
 - **附**：APK 里 **121MB 是引擎运行时**（`runtime.zip`），代码改动只有几 KB ——
   所以"每改一行就要下 118MB"是这条流程的固有成本，日常小改可先用
   「CI 绿 + 解 dex 做二进制层检查」，只在需要真机验证时才下载。
+
+### H4. ★★把「异步停引擎」写成整个 stop() 丢后台 → 竞态：岛上永远停在「启动中」
+
+- **现象**（H3 的修法引入的新 bug，真机实测）：停服务后立刻重新打开 App，
+  引擎**明明在跑**（3180 有响应、node 进程在），但岛上一直显示「DSH · 启动中」，
+  监督器像"躺平"了一样不再更新状态。
+- **根因**：H3 的修法把 **整个** `EngineSupervisor.stop()` 丢到后台线程。而 `stop()` 里
+  发完 TERM 后会 **阻塞约 8 秒**等引擎死，然后才执行 `process = null` + `state = Stopped`。
+  于是出现窗口期：用户在这 8 秒内重开 App → 新的监督循环已经起来并成功拉起引擎，
+  **迟到的 stop() 才回来** → 它把 `loopJob`（新循环）cancel 掉、把 `process` 清空、
+  把状态打回 `Stopped` → 新循环死掉、引擎无人监督、状态再也不更新
+  （`Stopped` 在岛上映射到 `else` 分支 = 「启动中」）。
+- **修法（v1.2.28）**：
+  1. **状态变更与阻塞等待彻底分离** —— 新增 `EngineSupervisor.stopAsync()`：
+     `userStop/loopJob/process/state` 的变更**同步立即完成**；后台协程只对
+     **快照到的那个进程**做 `stop()`，**不再碰任何共享状态**。
+  2. 加**监督代际 `epoch`**：`start()/stop()/stopAsync()` 都递增；循环捕获自己的 token，
+     在**循环入口**与**`proc.exitFuture.get()` 返回后**各检一次。原因：
+     `loopJob.cancel()` 只能取消挂起点，而 `exitFuture.get()` 是阻塞不可取消的 ——
+     旧循环会一直等到引擎退出才返回，那时 `userStop` 可能已被新一轮 start() 置回 false，
+     旧循环就会继续往下走：写回 `Backoff`、甚至**再拉起一个引擎抢 3180**。
+- **验证**：`am stopservice` → **立刻**（2 秒内）`am start MainActivity` → 岛上应恢复正常
+  （项目名 · 就绪/工作中），且**只有一个** dev 引擎 node；`engine.log` 里不该出现两轮
+  连续 `engine start`。修复前该场景稳定复现「永远启动中」。
