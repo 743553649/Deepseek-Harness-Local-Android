@@ -22,7 +22,7 @@ import android.os.Looper
  * 为什么用 extras 请求上岛：SDK（android.jar API 36）没有公开的「请求 promoted」方法
  * （实测只有 ProgressStyle / setShortCriticalText / NotificationManager.canPostPromotedNotifications），
  * 而框架 Notification.hasRequestedPromotedOngoing() 读的就是这个 extra；
- * NMS 的 fixNotification() 只剥离 summarization/mediaRemote*/substName 几个 key，不会剥它。
+ * NMS 的 fixNotification() 只剥离 summarization、mediaRemote 系列、substName 几个 key，不会剥它。
  */
 object LiveUpdateProbe {
 
