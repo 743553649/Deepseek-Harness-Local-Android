@@ -32,8 +32,13 @@ class SessionWatcher(private val home: File) {
             if (!project.isDirectory) continue
             var projectNewest = 0L
             runCatching { project.listFiles() }.getOrNull()?.forEach { session ->
-                val stamp = File(session, SESSION_FILE).lastModified()
-                if (stamp > projectNewest) projectNewest = stamp
+                runCatching { session.listFiles() }.getOrNull()?.forEach { file ->
+                    // 文件名随引擎版本变（实测：官方版 1.2.25 = session.jsonl.zstd，
+                    // dev 版 1.2.26 = session.v3.jsonl.zstd）→ 按后缀匹配，不写死文件名
+                    if (!file.name.endsWith(SESSION_SUFFIX)) return@forEach
+                    val stamp = file.lastModified()
+                    if (stamp > projectNewest) projectNewest = stamp
+                }
             }
             if (projectNewest <= 0L) continue
             if (nowMs - projectNewest <= ACTIVE_WINDOW_MS) active++
@@ -48,7 +53,15 @@ class SessionWatcher(private val home: File) {
     /** 目录名 → 可显示的项目名（取路径最后一段） */
     private fun decodeName(encoded: String): String {
         val body = encoded.removePrefix("--").removeSuffix("--")
-        val decoded = HEX_TOKEN.replace(body) { m -> m.groupValues[1].toInt(16).toChar().toString() }
+        // 编码形如 ~5F00~53D1~：相邻字符**共用中间的 ~**，所以按 ~ 切段后逐段解码；
+        // 用正则匹配 ~XXXX~ 会漏掉第二个字（实测得到"开53D1"）
+        val decoded = body.split('~').joinToString("") { seg ->
+            if (seg.length == 4 && seg.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+                seg.toInt(16).toChar().toString()
+            } else {
+                seg
+            }
+        }
         // `-` 既是路径分隔符也可能是名字里的连字符，无法区分：
         // 先按路径还原试试，真的存在就取末段；不存在就退回"最后一个连字符之后"。
         val asPath = File("/" + decoded.replace('-', '/'))
@@ -57,11 +70,10 @@ class SessionWatcher(private val home: File) {
     }
 
     private companion object {
-        const val SESSION_FILE = "session.jsonl.zstd"
+        /** 会话文件名后缀（引擎版本间会变，只匹配后缀） */
+        const val SESSION_SUFFIX = ".jsonl.zstd"
 
         /** 多久内有写入就算这个项目"在活跃"（用户选定：5 分钟） */
         const val ACTIVE_WINDOW_MS = 5 * 60 * 1000L
-
-        val HEX_TOKEN = Regex("~([0-9A-Fa-f]{4})~")
     }
 }
