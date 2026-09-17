@@ -632,3 +632,29 @@
 - **验证**：`am stopservice` → **立刻**（2 秒内）`am start MainActivity` → 岛上应恢复正常
   （项目名 · 就绪/工作中），且**只有一个** dev 引擎 node；`engine.log` 里不该出现两轮
   连续 `engine start`。修复前该场景稳定复现「永远启动中」。
+
+### H5. ★★EADDRINUSE「清孤儿」是死代码；且它的清除模式会误杀官方版引擎
+
+- **现象**（真机实测）：某次停止/重启后，dev 版出现 **2~3 个引擎 node 进程**同时存在，
+  新的引擎全部 `listen EADDRINUSE 127.0.0.1:3180` 即死，监督器在"健康→引擎退出→重试"
+  之间反复循环；而端口 3180 一直有响应（残留引擎在应答），界面上看起来"能用"。
+- **根因（三层，都要修）**：
+  1. **判定用了哈希**：`failureSignature()` 返回 `"$status:${tail.hashCode()}"`，
+     而清理分支写的是 `deterministicFailure?.contains("EADDRINUSE")` ——
+     **哈希永远不可能包含这个子串** → 这个兜底自诞生起就没执行过（v1.2.22 事故的补丁其实无效）。
+  2. **健康检查只探端口**：`pollHealth()` 只要 3180 有 200..499 应答就算"健康"，
+     于是**残留引擎的应答被当成本轮引擎就绪** → 监督器认为自己成功了，直到它 spawn 的
+     那个（已 EADDRINUSE 死掉的）进程退出才回神 → 白等一轮。
+  3. **spawn 后可能失联**：`spawnEngine()` 在 IO 线程上执行，期间若发生 stop/restart，
+     旧实现紧接着无条件 `process = proc` 认领 —— 这个刚 fork 的引擎就再也没人管，
+     它会继续霸占端口，喂给下一轮一个 EADDRINUSE。
+- **修法（v1.2.28）**：
+  1. 新增 `logTailText()` 取**日志原文**，`EADDRINUSE` 判定改用它；并加"本轮确有引擎死亡"
+     的 `engineDied` 门闸，避免拿陈年日志误判；
+  2. 认领前校验代际：`if (token != epoch) { proc.stop(); return }`；
+  3. 清除模式**按包名限定** `"${'$'}{ctx.packageName}/files/engine/bin/node"` ——
+     原来的裸 `files/engine/bin/node` 在**官方版与本版共存**时会同时命中官方版引擎，
+     等于把正在服务另一个会话的引擎杀掉（本机两个 App 同时装的场景必踩）。
+- **验证**：制造残留（手动留一个 engine node）后重启引擎，日志应出现
+  `EADDRINUSE: killed orphan engine node(s) of app.dsh.mobile.dev`，且**官方版引擎 PID 不变**；
+  随后只应有 **1 个** dev 引擎进程（`ps` 核对）。

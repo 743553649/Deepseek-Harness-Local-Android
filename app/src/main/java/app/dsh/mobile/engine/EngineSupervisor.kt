@@ -144,6 +144,14 @@ class EngineSupervisor(private val ctx: Context) {
     fun logFile(): File = File(EngineConfig.engineRoot(ctx), "engine.log")
 
     /**
+     * 引擎日志尾部原文（最近的 4KB）。
+     * ⚠️ 与 [failureSignature] 分开：签名是**哈希**（给 guardian 做"同签名连续"判定用），
+     * 而"是不是 EADDRINUSE"这类判定**必须看原文** —— 早期实现拿哈希去 `contains("EADDRINUSE")`，
+     * 于是清孤儿的兜底是**死代码**，从来没生效过（真机实测：残留引擎霸占 3180 后反复 spawn 撞车）。
+     */
+    private fun logTailText(): String = runCatching { logFile().readText().takeLast(4096) }.getOrDefault("")
+
+    /**
      * 失败签名：用「引擎日志尾部 + 退出码」的哈希近似。
      * 确定性崩溃（坏配置）每次堆栈一致 → 同签名；
      * 偶发崩溃（OOM/被杀）尾部随机 → 不同签名不累计。
@@ -153,7 +161,7 @@ class EngineSupervisor(private val ctx: Context) {
         // streak 永远重置 → 永远到不了阶段阈值（自愈失效实测根因）。
         // 数字全部归一为 #，保留错误结构与字面（不同异常仍然不同签名）。
         val tail = runCatching {
-            logFile().readText().takeLast(4096)
+            logTailText()
                 .lineSequence()
                 .filter { it.contains("Error") || it.contains("at ") }
                 .toList()
@@ -171,6 +179,9 @@ class EngineSupervisor(private val ctx: Context) {
             // 仅当引擎「自行死亡」（fork 失败 / 启动期退出）才值得让 guardian 定罪；
             // 健康超时自杀、安装异常、Healthy 后运行中退出都不算配置崩溃。
             var deterministicFailure: String? = null
+            // 本轮引擎是否真的死了（启动期死 / 健康后退出都算）。EADDRINUSE 判定用它，
+            // 避免拿陈年日志误判成"端口又冲突了"。
+            var engineDied = false
             try {
                 // 启动前先把被误隔离的引擎内置 patch 恢复（自愈；防 ENOENT fail-loud）
                 val healed = withContext(Dispatchers.IO) { guardian.restoreQuarantinedBuiltinOverlays() }
@@ -209,6 +220,13 @@ class EngineSupervisor(private val ctx: Context) {
 
                 _state.value = State.Starting
                 val proc = withContext(Dispatchers.IO) { spawnEngine() }
+                // ⚠️ 认领前先确认这轮监督还"在任"：`spawnEngine()` 是 IO 线程上的慢操作，
+                // 期间若发生过 stop/restart（token 已过期），这个刚 fork 出来的引擎就没人管了。
+                // 实测后果：它继续霸占 3180 → 新引擎全部 EADDRINUSE → 进程越攒越多。
+                if (token != epoch) {
+                    withContext(Dispatchers.IO) { runCatching { proc.stop() } }
+                    return
+                }
                 process = proc
 
                 val healthy = pollHealth(EngineConfig.DEFAULT_PORT, proc)
@@ -237,9 +255,11 @@ class EngineSupervisor(private val ctx: Context) {
                     // 就在这里收工，别把状态写回 Backoff、更别又拉一个引擎起来。
                     val status = proc.exitFuture.get()
                     if (userStop || token != epoch) break
+                    engineDied = true
                     Log.w(TAG, "engine exited, raw status=0x${status.toString(16)}")
                 } else if (proc.exitFuture.isDone) {
                     // 启动期内进程自己死了——唯一进入自愈判定的信号
+                    engineDied = true
                     deterministicFailure = failureSignature(lastExitStatus)
                 } else {
                     // 健康检查超时：引擎没死是我们主动停的——很可能是慢启动，
@@ -249,25 +269,31 @@ class EngineSupervisor(private val ctx: Context) {
             } catch (e: EngineStartException) {
                 if (userStop) break
                 Log.e(TAG, "supervision failure", e)
+                engineDied = true
                 deterministicFailure = failureSignature(null)
             } catch (e: Exception) {
                 if (userStop) break
                 Log.e(TAG, "supervision failure", e)
             }
 
-            // ---- 自愈判定：仅对「引擎真死」且签名连续一致时逐步升级 ----
-            // 【v1.2.22】Root→普通切换后 root 孤儿 node 霸占 3080 → 普通引擎
-            // EADDRINUSE 真死循环（孤儿在服务所以页面/AI 看似正常）。检测到
-            // EADDRINUSE 立即用 su 清掉 engine/bin/node 的全部残留后重试。
-            if (deterministicFailure?.contains("EADDRINUSE") == true) {
+            // ---- EADDRINUSE 处置：端口被**残留引擎**占着，先清掉再重试 ----
+            // 【v1.2.22】Root 模式下上一实例的引擎可能没死透，霸占 3180 →
+            // 新引擎 listen 失败即死 → 无限重启（页面/AI 看似正常，因为残留引擎在服务）。
+            //
+            // ⚠️ 判定必须看**日志原文**：`failureSignature` 返回的是哈希字符串
+            // （"$status:${hashCode}"），早期直接拿它 `.contains("EADDRINUSE")` →
+            // 这个兜底**从来没生效过**（真机实测：反复 spawn 撞车、引擎进程越攒越多）。
+            if (engineDied && logTailText().contains("EADDRINUSE")) {
                 val su = Privilege.findSu()
                 if (su != null) {
+                    // 模式**按包名限定**：官方版与本版共存时，裸 'files/engine/bin/node'
+                    // 会连同官方版的引擎一起杀掉 —— 那是在杀正在服务另一个会话的引擎。
+                    val pattern = ctx.packageName + "/files/engine/bin/node"
                     runCatching {
-                        ProcessBuilder(su, "-c",
-                            "pkill -9 -f 'files/engine/bin/node' 2>/dev/null; true")
+                        ProcessBuilder(su, "-c", "pkill -9 -f '$pattern' 2>/dev/null; true")
                             .start().waitFor()
                     }
-                    Log.w(TAG, "EADDRINUSE: killed orphan engine node(s) (root leftovers)")
+                    Log.w(TAG, "EADDRINUSE: killed orphan engine node(s) of ${ctx.packageName}")
                     deterministicFailure = null   // 已处置，不计入 guardian（与配置无关）
                     backoffIndex = 0
                 }
