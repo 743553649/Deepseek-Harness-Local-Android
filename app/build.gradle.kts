@@ -90,4 +90,6 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("dev.rikka.shizuku:aidl:13.1.5")
+    // 单元测试（JVM，不需要设备）：给纯逻辑（会话目录名解码等）上回归网
+    testImplementation("junit:junit:4.13.2")
 }
