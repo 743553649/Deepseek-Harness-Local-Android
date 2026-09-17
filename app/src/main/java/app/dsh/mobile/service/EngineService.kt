@@ -114,23 +114,33 @@ class EngineService : Service() {
                     runCatching { watcher.snapshot() }.getOrNull()
                 }
                 val project = when {
-                    snapshot == null -> "DSH"
-                    snapshot.activeProjects > 1 -> "${snapshot.activeProjects} 个项目"
-                    else -> snapshot.project ?: "DSH"
+                    snapshot == null -> getString(R.string.island_dsh)
+                    snapshot.activeProjects > 1 ->
+                        getString(R.string.island_projects, snapshot.activeProjects)
+                    else -> snapshot.project ?: getString(R.string.island_dsh)
                 }
                 when (app.supervisor.state.value) {
                     // 忙碌词交给 FluidCloud 拼：agent/status 一到就立刻反映，不必等这轮轮询
                     is EngineSupervisor.State.Healthy ->
-                        FluidCloud.setAuto(this@EngineService, project, "就绪", "工作中")
+                        FluidCloud.setAuto(
+                            this@EngineService, project,
+                            getString(R.string.island_ready), getString(R.string.island_busy),
+                        )
                     is EngineSupervisor.State.Backoff, is EngineSupervisor.State.Failed ->
-                        FluidCloud.setAuto(this@EngineService, "DSH", "引擎异常")
+                        FluidCloud.setAuto(
+                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_error),
+                        )
                     // Installing / Starting：本身看不出"首次启动"还是"崩溃后重启"，
                     // 而 Backoff 只存在 2 秒就被这两个状态覆盖 —— 真机上引擎反复崩，
                     // 岛却一直说「启动中」，用户以为一切正常（实测）。连续失败 ≥2 次就报异常。
                     else -> if (app.supervisor.lastBackoffAttempt >= 2) {
-                        FluidCloud.setAuto(this@EngineService, "DSH", "引擎异常")
+                        FluidCloud.setAuto(
+                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_error),
+                        )
                     } else {
-                        FluidCloud.setAuto(this@EngineService, "DSH", "启动中")
+                        FluidCloud.setAuto(
+                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_starting),
+                        )
                     }
                 }
                 // Agent 忘了调 island done 时别让「60%」一直挂着（引擎空闲 + 10 分钟无更新 → 回自动层）

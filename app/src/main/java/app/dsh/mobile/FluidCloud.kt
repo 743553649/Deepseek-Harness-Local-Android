@@ -122,7 +122,7 @@ object FluidCloud {
         agentTitle = title
         agentText = text
         agentPercent = percent
-        agentCritical = percent?.let { "$it%" } ?: "工作中"
+        agentCritical = percent?.let { "$it%" } ?: ctx.getString(R.string.island_busy)
         agentUpdatedAt = android.os.SystemClock.elapsedRealtime()
         agentIsDone = false
         render(ctx)
@@ -130,10 +130,10 @@ object FluidCloud {
 
     /** Agent 显式收尾（`island done`）→ 常驻「✓ 完成」直到下一次任务开始 */
     fun done(ctx: Context, text: String?) {
-        agentTitle = "✓ 完成"
+        agentTitle = ctx.getString(R.string.island_done)
         agentText = text
         agentPercent = null
-        agentCritical = "完成"
+        agentCritical = ctx.getString(R.string.island_done_short)
         agentUpdatedAt = android.os.SystemClock.elapsedRealtime()
         agentIsDone = true
         render(ctx)
@@ -183,7 +183,7 @@ object FluidCloud {
         // startForeground 要求通知渠道**已存在**，否则这条通知根本不显示
         // （此时还没跑过任何一轮 render，post() 里的建渠道还没执行过）
         ensureChannel(ctx)
-        return build(ctx, "DSH", "启动中", null, null)
+        return build(ctx, ctx.getString(R.string.island_dsh), ctx.getString(R.string.island_starting), null, null)
     }
 
     /** 建渠道（幂等：同 id 重复创建是 no-op，不会覆盖用户改过的设置） */
@@ -228,10 +228,10 @@ object FluidCloud {
         if (!active(ctx)) return
         val title = agentTitle
         val built = if (title != null) {
-            post(ctx, title, agentCritical ?: "工作中", agentText, agentPercent)
+            post(ctx, title, agentCritical ?: ctx.getString(R.string.island_busy), agentText, agentPercent)
         } else {
             val word = if (engineBusy) autoBusyWord ?: autoIdleWord else autoIdleWord
-            post(ctx, autoTitle.ifEmpty { "DSH 就绪" }, word, null, null)
+            post(ctx, autoTitle.ifEmpty { ctx.getString(R.string.island_fallback) }, word, null, null)
         }
         if (!built || !allowRefresh || refreshScheduled) return
         // 补刷一帧：首帧常拿不到 promoted 标志（实测），补一次即可上岛

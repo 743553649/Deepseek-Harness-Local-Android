@@ -317,7 +317,7 @@ document.getElementById('api').textContent = checks.map(function(c){
             "status" -> FluidCloud.onAgentStatus(ctx, obj.optString("status"))
             "set" -> FluidCloud.report(
                 ctx,
-                obj.optString("title").ifEmpty { "Agent 工作中" },
+                obj.optString("title").ifEmpty { ctx.getString(R.string.island_agent_default) },
                 obj.optString("text").takeIf { it.isNotEmpty() },
                 if (obj.has("progress")) obj.optInt("progress") else null,
             )

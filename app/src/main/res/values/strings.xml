@@ -83,6 +83,18 @@
     <string name="setting_island_unsupported">系统不支持</string>
     <string name="setting_island_idle_hint">引擎未运行，下次启动生效</string>
 
+    <!-- 流体云状态岛上的文案（FluidCloud / EngineService / AgentBridge 引用） -->
+    <string name="island_ready">就绪</string>
+    <string name="island_busy">工作中</string>
+    <string name="island_starting">启动中</string>
+    <string name="island_error">引擎异常</string>
+    <string name="island_done">✓ 完成</string>
+    <string name="island_done_short">完成</string>
+    <string name="island_dsh">DSH</string>
+    <string name="island_fallback">DSH 就绪</string>
+    <string name="island_projects">%1$d 个项目</string>
+    <string name="island_agent_default">Agent 工作中</string>
+
     <string name="setting_scale">页面缩放</string>
     <string name="setting_scale_sub">调节网页显示比例（浏览器缩放）</string>
 
