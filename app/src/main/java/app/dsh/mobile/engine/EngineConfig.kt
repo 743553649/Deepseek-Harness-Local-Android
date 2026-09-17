@@ -411,7 +411,7 @@ object EngineConfig {
     private fun applyFluidCloudPlugin(ctx: android.content.Context) {
         try {
             val plugin = File(webProfile(ctx), FLUID_CLOUD_PLUGIN)
-            plugin.writeText(fluidCloudPluginJs())
+            plugin.writeText(fluidCloudPluginJs(ctx))
             fluidCloudPatch(ctx).writeText(
                 "# [dsh-android] 流体云插件补丁层（App 每次启动重写，勿手改）\n" +
                     "- insert:\n" +
@@ -423,62 +423,23 @@ object EngineConfig {
         }
     }
 
-    private fun fluidCloudPluginJs(): String = """
-        // [dsh-android] 流体云状态上报插件（App 写入，勿手改）
-        // 1) 订阅 agent/status：running = 思考中或跑工具中，idle = 空闲。
-        //    该事件只在状态**变化**时发，所以无需节流。
-        // 2) 让会话目录对 App 可读（见下面的 makeReadable，v1.2.28）。
-        import { chmodSync, readdirSync } from 'node:fs'
-
-        // 【v1.2.28 实测坑】Root 模式下引擎以 uid 0 运行，它新建的会话目录是 0700 root，
-        // 而 App 界面进程是 uid 10491 —— 读不进去，App 侧 SessionWatcher 只能跳过，
-        // 于是岛上的「项目名」退化（退回 DSH 或旧项目）。插件跑在引擎进程里（root），
-        // 把**两级目录**改成 0755 即可：App 只做 list + stat（不读文件内容），
-        // 所以文件本身保持 0600 不用动，安全面不变（父目录仍是 App 私有的 0700）。
-        const makeReadable = () => {
-          try {
-            const root = (process.env.DSH_HOME || '') + '/sessions'
-            for (const proj of readdirSync(root)) {
-              try { chmodSync(root + '/' + proj, 0o755) } catch (e) {}
-              let subs = []
-              try { subs = readdirSync(root + '/' + proj) } catch (e) { continue }
-              for (const s of subs) {
-                try { chmodSync(root + '/' + proj + '/' + s, 0o755) } catch (e) {}
-              }
-            }
-          } catch (e) {}
-        }
-
-        export const name = 'dsh-android-fluid-cloud'
-
-        export function apply(ctx) {
-          const port = $AGENT_BRIDGE_PORT
-          const post = (body) => {
-            fetch('http://127.0.0.1:' + port + '/island', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify(body),
-            }).catch(() => {})
-          }
-          ctx.on('agent/status', (payload) => {
-            const status = payload && payload.status
-            if (status === 'running' || status === 'idle') {
-              makeReadable()
-              post({ action: 'status', status })
-            }
-          })
-          // 引擎刚起来时必然空闲：先报一次，免得上一次崩溃前留下的"工作中"卡在岛上
-          makeReadable()
-          post({ action: 'status', status: 'idle' })
-          // 新会话目录随时可能出现（用户开新会话 / 换工作区），比 App 的 5 秒轮询略快即可。
-          // unref：退出时不要因为这个定时器拖着进程不走。
-          const timer = setInterval(makeReadable, 3000)
-          if (timer.unref) timer.unref()
-        }
-    """.trimIndent() + "\n"
+    /**
+     * 从 assets 读出插件源码，并把能力桥端口填进去（v1.2.30）。
+     *
+     * 原本这段 JS 是写在本文件里的 Kotlin 字符串：`$` 与 `"""` 全要转义、读写都别扭，
+     * 而且改动必须重新编译才看得到。挪成 assets 资源后它就是一个普通 .mjs 文件。
+     * 端口只有 App 知道，所以文件里留 `__DshBridgePort__` 占位，这里替换成实际值。
+     */
+    private fun fluidCloudPluginJs(ctx: android.content.Context): String {
+        val raw = ctx.assets.open(FLUID_CLOUD_PLUGIN).bufferedReader().use { it.readText() }
+        return raw.replace(BRIDGE_PORT_PLACEHOLDER, AGENT_BRIDGE_PORT.toString())
+    }
 
     private const val TAG = "EngineConfig"
 
-    /** 引擎侧插件文件名（相对 profile 目录）；用 .mjs 让 Node 直接按 ESM 加载，免掉 module-type 警告 */
+    /** 引擎侧插件文件名；同时是 assets 里的文件与 profile 目录下的目标文件（v1.2.30 起源码在 assets） */
     private const val FLUID_CLOUD_PLUGIN = "fluid-cloud.mjs"
+
+    /** assets 里的端口占位符（端口只有 App 知道，写不进资源文件） */
+    private const val BRIDGE_PORT_PLACEHOLDER = "__DshBridgePort__"
 }

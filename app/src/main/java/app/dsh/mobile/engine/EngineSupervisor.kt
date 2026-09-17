@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
 /**
  * 引擎监督器：冷启动 → 健康检查 → 运行中 → 崩溃退避重启 的完整状态机。
@@ -70,6 +71,20 @@ class EngineSupervisor(private val ctx: Context) {
     }
 
     private var process: EngineProcess? = null
+
+    /**
+     * 刚被 [stopAsync] 异步停掉、**可能还没退干净**的那个进程（v1.2.30，修 I1）。
+     *
+     * 为什么需要它：引擎优雅退出要**约 8 秒**（它在 flush 会话），而 `stopAsync` 为了不 ANR
+     * 把等待丢到了后台。用户完全可能在这 8 秒窗口内重开 App —— 新监督循环立刻 spawn 新引擎，
+     * 而旧引擎还占着 3180 → 新引擎启动即死（`listen EADDRINUSE`）→ 界面弹「进程异常退出」，
+     * 退避 2 秒后重试才成功（真机实测，PITFALLS I1）。
+     *
+     * 处置：监督循环在 `spawnEngine()` 之前先等它退出（见 [awaitPendingShutdown]）。
+     */
+    @Volatile
+    private var pendingShutdown: EngineProcess? = null
+
     private var loopJob: Job? = null
     private var userStop = false
     private var scopeRef: CoroutineScope? = null
@@ -128,6 +143,10 @@ class EngineSupervisor(private val ctx: Context) {
      * 残留风险与兜底：旧引擎可能还占着端口，新循环启动时若撞上 EADDRINUSE，
      * 监督循环已有专门的处置（用 su 清残留 node 后重试，见 supervisionLoop 的
      * `deterministicFailure.contains("EADDRINUSE")` 分支）。
+     *
+     * 【v1.2.30 / I1】这个"残留风险"在真机上被复现了：用户在 8 秒窗口内重开 App，
+     * 新引擎必撞 EADDRINUSE 并弹「进程异常退出」。所以这里额外把待退进程记进
+     * [pendingShutdown]，由监督循环在 spawn 之前先等它退干净。
      */
     fun stopAsync(scope: CoroutineScope) {
         epoch++
@@ -136,8 +155,37 @@ class EngineSupervisor(private val ctx: Context) {
         loopJob = null
         val dying = process
         process = null
+        pendingShutdown = dying
         _state.value = State.Stopped
         scope.launch(Dispatchers.IO) { runCatching { dying?.stop() } }
+    }
+
+    /**
+     * 等 [pendingShutdown] 那个进程真正退出（最多 [SHUTDOWN_WAIT_SECONDS] 秒）。
+     *
+     * **必须在后台线程调用**（IO 线程）：这段时间纯粹是在等引擎 flush 会话，
+     * 放主线程就是 ANR —— 那正是 [stopAsync] 当初改成异步的原因。
+     * 进程早已退出时立即返回；超时也放行，交给原有的 EADDRINUSE 兜底处置。
+     */
+    private fun awaitPendingShutdown() {
+        val pending = pendingShutdown ?: return
+        pendingShutdown = null
+        if (pending.exitFuture.isDone) return
+        val startedAt = System.currentTimeMillis()
+        runCatching { pending.exitFuture.get(SHUTDOWN_WAIT_SECONDS, TimeUnit.SECONDS) }
+            .onSuccess {
+                Log.i(
+                    TAG,
+                    "previous engine exited after ${System.currentTimeMillis() - startedAt}ms; spawning new one",
+                )
+            }
+            .onFailure {
+                Log.w(
+                    TAG,
+                    "previous engine still alive after ${SHUTDOWN_WAIT_SECONDS}s; " +
+                        "spawning anyway (EADDRINUSE fallback armed)",
+                )
+            }
     }
 
     /**
@@ -260,6 +308,12 @@ class EngineSupervisor(private val ctx: Context) {
                     }
                 }
                 _installProgress.value = null
+
+                // 【v1.2.30 / I1】spawn 之前先等上一轮异步停掉、还没退干净的引擎（约 8 秒）。
+                // 后台等，不阻塞主线程；超时放行，交给下面的 EADDRINUSE 兜底处置。
+                withContext(Dispatchers.IO) { awaitPendingShutdown() }
+                // 等待期间可能又发生过 stop/restart（token 过期）→ 本循环已不在任，立刻收工
+                if (token != epoch) return
 
                 _state.value = State.Starting
                 val proc = withContext(Dispatchers.IO) { spawnEngine() }
@@ -460,5 +514,8 @@ class EngineSupervisor(private val ctx: Context) {
 
         /** 引擎打印 "dsh web: <url>" 与健康检查通过之间的最大等待窗 */
         private const val WEB_URL_TIMEOUT_MS = 15_000L
+
+        /** spawn 之前等待上一个引擎退出的上限（实测优雅退出约 8 秒，留出余量） */
+        private const val SHUTDOWN_WAIT_SECONDS = 10L
     }
 }
