@@ -586,3 +586,25 @@
   否则新引擎 EADDRINUSE（见 A1 的无限重启事故），不能一起改成异步。
 - **验证**：`am stopservice` 后界面不再无响应；`logcat -b events | grep am_anr` 无该包记录；
   `/data/anr/` 不再生成该 pid 的堆栈。
+
+### F3. Actions 产物（artifact）用不了国内加速站 —— 要镜像就走 Release 附件
+
+- **现象**：每次验证都要下 ~118MB 的 artifact，国内直连会反复中断
+  （实测一轮里出现 `ECONNRESET` / `ETIMEDOUT` / `getaddrinfo` 失败共 4 次）。
+- **根因（两条，都要知道）**：
+  1. **链路**：artifact 不能直接下 —— 先要带令牌调 `api.github.com` 拿一个**短期签名地址**
+     （指向 Azure blob）。公开加速站（ghproxy 之类）只代理 `github.com` /
+     `raw.githubusercontent.com` 这类地址，**也不会替我们带令牌** → 镜像走不通。
+  2. **签名地址会过期**：实测下到 **93MB（约 10 分钟）**后开始**持续 403**；
+     如果续传脚本不换新签名地址，就会在 403 上空转（首次实现就卡了 40 次）。
+- **修法**：
+  1. **断点续传脚本**（`dl-resume.js`）：按 `Range` 从已下载字节继续；
+     **收到 403/401/410 就重新调 API 换新签名地址再续**。
+     实测：8.6MB → 93MB（断 6 次）→ 换签名地址 → 117.7MB 完成，全程没有从头再来。
+  2. **需要镜像时走 Release 附件**：给 main 打 tag → workflow 的 `release` job 把 APK 挂到
+     Releases → 用加速站下这个地址（PITFALLS F1 实测 ghproxy.net / ghfast.top 可用）：
+     `https://ghproxy.net/https://github.com/<owner>/<repo>/releases/download/<tag>/<apk>`
+- **验证**：`git tag` 后确认 release job = success、Releases 页面出现 asset；再实测镜像地址能下完。
+- **附**：APK 里 **121MB 是引擎运行时**（`runtime.zip`），代码改动只有几 KB ——
+  所以"每改一行就要下 118MB"是这条流程的固有成本，日常小改可先用
+  「CI 绿 + 解 dex 做二进制层检查」，只在需要真机验证时才下载。
