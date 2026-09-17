@@ -703,3 +703,72 @@
   判定改用 `logTextSince(logMark)`（日志泵 2MB 环形截断导致 mark 失效时退回尾部窗口）。
 - 验证：连杀引擎两次（不产生 EADDRINUSE）→ 日志里**不应出现**
   `EADDRINUSE: killed orphan engine node(s)`；制造真冲突时才出现。
+
+---
+
+## I. 流体云 · 已知未修问题与界面事实（下一轮开工清单）
+
+> 本节记的都是**真机实测确认、但本轮没修**的东西，格式：现象 → 根因（带证据）→ 建议修法 → 怎么验。
+> 上一轮已完成并验证的部分见 H1~H7（那些是"已修"）。
+
+### I1. ★退出后 ~8 秒内重开 App → 新引擎第一次启动必撞 EADDRINUSE
+
+- **现象**（用户实测）：点通知栏「退出」后立刻打开 App，引擎**第一次启动必失败**（顶部状态显示
+  「进程异常退出…N 秒后自动重启（第 1 次）」），约 3 秒后第二次启动成功。
+- **证据**：`engine.log` 里失败那次是
+  `Error: listen EADDRINUSE: address already in use 127.0.0.1:3180`。
+- **根因**：H3 把「退出」时的停引擎改成**后台异步**（为了修 ANR），而引擎**优雅退出要约 8 秒**
+  （实测 8078ms，它要 flush 会话）。用户在 8 秒窗口内重开 App → 监督器立刻 spawn 新引擎 →
+  旧引擎还占着 3180 → 新引擎启动即死 → 退避 2 秒 → 重试成功。
+  **也就是"修 ANR"换来了这个竞态。**
+- **建议修法**：监督循环在 `spawnEngine()` **之前**先等旧引擎退干净（后台等待，不阻塞主线程）：
+  `stopAsync()` 里把要停的进程存成 `pendingShutdown`，循环里
+  `pendingShutdown?.exitFuture?.get(10, TimeUnit.SECONDS)`（超时就继续，靠已有的 EADDRINUSE 兜底）。
+- **怎么验**：点「退出」→ **3 秒内**重开 App → `engine.log` **不应**再出现 EADDRINUSE；
+  `logcat -b events | grep am_anr` 无记录（不能把 ANR 修回来）。
+
+### I2. 自动层 5 秒轮询 → 引擎就绪后岛上可能仍显示「启动中」最多 5 秒
+
+- **现象**（用户实测）：引擎明明已就绪，折叠态胶囊**有时**还显示「启动中」，观感"不稳定"。
+  注：其中一部分是 I1 那次失败启动造成的（那几秒确实没就绪），但**更新滞后**这个窗口客观存在。
+- **根因**：岛上文案由 `EngineService.startIslandLoop()` **每 5 秒**轮询 `supervisor.state.value` 后写入；
+  状态从 `Starting` → `Healthy` 的瞬间不会立刻反映。
+- **建议修法**：让 `stateJob` 的收集回调（已经收到每次状态变化）也刷新岛（把 5 秒轮询降级为兜底）；
+  注意 `setAuto` 自带幂等去重，重复调用无副作用。
+- **怎么验**：杀引擎后重启，秒表盯着胶囊：从日志 `engine healthy on :3180` 到胶囊变「就绪」应 < 1 秒。
+
+### I3. 折叠态看不到"Agent 在干什么"（字段放错了位置）
+
+- **现象**（用户实测）：Agent `island set "文案资源化验证" 77` 后，**折叠态只有一条进度线 + 77%**，
+  看不出这条进度是关于什么的；展开后才能在左侧看到动作名。
+- **根因（界面事实，务必记住）**：
+
+  | 我们设置的字段 | 折叠态（胶囊） | 展开态（面板） |
+  |---|---|---|
+  | `setSmallIcon` | ✅ 左侧小图标 | ✅ 右侧应用图标 |
+  | `setShortCriticalText`（就绪/工作中/45%/完成） | ✅ 右侧状态词 | ✅ |
+  | `ProgressStyle`（有百分比=真实进度条；无=不确定进度） | ✅ 那条**横线** | ✅ 中部 |
+  | `setContentTitle`（项目名 / **Agent 动作**） | ❌ 不显示 | ✅ 左侧 |
+  | `setContentText`（Agent 附带说明） | ❌ 不显示 | ✅ 正文 |
+  | `addAction`「退出」 | ❌ 不显示 | ✅ 底部 |
+
+  → Agent 的动作名放在 `title`，所以折叠态看不到。（另：本机"不确定进度"渲染成**横线**，**不是转圈**——
+  这也解释了「从没见过转圈图标」。）
+- **建议修法**：Agent 报进度时把动作名放进 `shortCriticalText`，例如 `整理会话 77%`，
+  `title` 仍保留完整动作给展开态。**文案格式需用户确认**（候选：`动作 77%` / `动作 · 77%` / 不带百分比时显示「工作中」）。
+- **怎么验**：`island set "整理会话" 60` → 折叠态应能读出"在干什么"。
+
+### 附：本轮实测出来的验证配方（下次直接用）
+
+```bash
+# 岛当前内容（折叠态那两格）
+dumpsys notification --noredact | grep -A 60 'id=4242' | grep -E 'android.title=|shortCriticalText|PROMOTED'
+# 前台服务通知身份 + 上岛标志
+dumpsys notification --noredact | grep -A 3 'pkg=app.dsh.mobile.dev.*id=4242' | grep 'flags='
+#   期望：ONGOING_EVENT|NO_CLEAR|FOREGROUND_SERVICE|PROMOTED_ONGOING
+# 开关（设置页「流体云状态岛」）落库在哪
+cat /data/user/0/app.dsh.mobile.dev/shared_prefs/dsh_ui.xml     # key: island_enabled
+# 引擎侧监督器日志
+logcat -d | grep EngineSupervisor        # healthy / exited / EADDRINUSE: killed orphan…
+# 单测（本地跑不了，看 CI 的 testDebugUnitTest 步骤）
+```

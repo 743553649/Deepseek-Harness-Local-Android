@@ -3,7 +3,7 @@
 **Deepseek-Harness-Local-Android — 在手机上运行完整的 DeepSeek Harness AI Agent（Local for Android）—— 无需 Root，无需 Termux，无需电脑。** —— 无需 Root，无需 Termux，无需电脑。**
 
 [![CI](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
-![Release](https://img.shields.io/badge/release-v1.2.26-blue)
+![Release](https://img.shields.io/badge/release-v1.2.29-blue)
 ![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
@@ -28,6 +28,12 @@ Agent 起一个本地 HTTP 服务（用内置 node），给你 `http://127.0.0.1
 
 **操作手机屏幕（非盲）**
 开启无障碍服务后，Agent 可**读取屏幕内容**（文本+坐标）并按文本/坐标精准点击，自动化操作其他 App（无障碍需在系统设置手动开启）。
+
+**状态岛（流体云）**
+引擎一就绪，ColorOS 16 的状态栏胶囊（流体云）就常驻显示当前状态：`项目名 · 就绪`；Agent 干活时变 `工作中`；
+两个项目同时活跃时显示 `N 个项目`；引擎反复启不起来时显示 `引擎异常`。Agent 还可主动上报具体动作与百分比
+（`island set "整理会话" 60` → 胶囊显示 `整理会话 60%`，`island done` → `✓ 完成`，留到下一次任务开始）。
+点击胶囊展开可看到项目名、进度与「退出」。不想要它？**设置 → 流体云状态岛** 可随时关闭（关闭后回到普通通知，不重启引擎）。
 
 **任务完成推送**
 Agent 完成长任务时自动发 Android 系统通知，锁屏/后台也不错过。
@@ -80,7 +86,7 @@ Agent 不只会用扩展中心，还会自己动手：会话里通过本地接�
 
 ## 📦 安装
 
-**下载 Release（推荐）**：前往 [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) 下载 APK（手机选 `arm64-v8a`，最新版 **v1.2.26**），允许安装未知来源应用后安装。v1.0.0+ 均可覆盖安装。
+**下载 Release（推荐）**：前往 [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) 下载 APK（手机选 `arm64-v8a`，最新版 **v1.2.29**），允许安装未知来源应用后安装。v1.0.0+ 均可覆盖安装。
 
 **从源码构建**（JDK 17 + Android SDK，NDK r26+、CMake 3.22.1）：
 

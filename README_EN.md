@@ -3,7 +3,7 @@
 **Deepseek-Harness-Local-Android — Run the full DeepSeek Harness AI agent locally on Android (Local for Android) — no root, no Termux, no PC needed.**
 
 [![CI](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
-![Release](https://img.shields.io/badge/release-v1.2.26-blue)
+![Release](https://img.shields.io/badge/release-v1.2.29-blue)
 ![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
@@ -28,6 +28,7 @@ Three privilege tiers on demand — Normal (sandbox, default) for everyday use; 
 
 - **Operate the phone screen (not blind)**: once the accessibility service is enabled, the Agent can **read screen content** (texts + coordinates) and tap precisely by text or coordinates — automating other apps
 - **Task-completion push**: the Agent sends an Android system notification when a long task finishes — never miss a background job
+- **Status island (Fluid Cloud)**: on ColorOS 16 the status-bar capsule stays resident once the engine is ready — `project · ready`, `working` while the Agent runs, `N projects` when several are active, `engine error` when it keeps crash-restarting. The Agent can report an explicit action with a percentage (`island set "tidy up" 60` → `tidy up 60%`; `island done` → `✓ done` until the next task). Tap the capsule to expand it for the project, progress and an Exit button. **Settings → Fluid status island** turns it off (falls back to a plain notification, no engine restart)
 
 **Strictly local data**
 The engine listens on `127.0.0.1` only; sessions, credentials, and workspaces live in the app's private storage — switch phones or uninstall, and your data goes exactly where you decide.
@@ -77,7 +78,7 @@ Normal mode is the default; options whose capability isn't ready are grayed out 
 
 ## 📦 Installation
 
-**Download a Release (recommended)**: grab the APK from [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) (pick `arm64-v8a` for phones; latest is **v1.2.26**), then install with unknown sources allowed. Any v1.0.0+ build can be installed over the top.
+**Download a Release (recommended)**: grab the APK from [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) (pick `arm64-v8a` for phones; latest is **v1.2.29**), then install with unknown sources allowed. Any v1.0.0+ build can be installed over the top.
 
 **Build from source** (JDK 17 + Android SDK, NDK r26+, CMake 3.22.1):
 
