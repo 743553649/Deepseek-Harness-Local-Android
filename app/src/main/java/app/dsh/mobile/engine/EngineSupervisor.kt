@@ -147,6 +147,11 @@ class EngineSupervisor(private val ctx: Context) {
      * 【v1.2.30 / I1】这个"残留风险"在真机上被复现了：用户在 8 秒窗口内重开 App，
      * 新引擎必撞 EADDRINUSE 并弹「进程异常退出」。所以这里额外把待退进程记进
      * [pendingShutdown]，由监督循环在 spawn 之前先等它退干净。
+     *
+     * ⚠️ `dying == null` 时**绝不能**覆盖 [pendingShutdown]：退出路径会调本方法两次 ——
+     * `exitCompletely()` 一次（此时 process 还在），紧接着 `stopSelf()` → `onDestroy()` 再一次
+     * （此时 process 已被上一句置空）。若第二次照写就把刚记下的待退进程抹掉了，
+     * 等待逻辑空转、EADDRINUSE 原样复现（v1.2.30 真机实测踩到，logcat 里连等待日志都没有）。
      */
     fun stopAsync(scope: CoroutineScope) {
         epoch++
@@ -155,7 +160,7 @@ class EngineSupervisor(private val ctx: Context) {
         loopJob = null
         val dying = process
         process = null
-        pendingShutdown = dying
+        if (dying != null) pendingShutdown = dying
         _state.value = State.Stopped
         scope.launch(Dispatchers.IO) { runCatching { dying?.stop() } }
     }
@@ -515,7 +520,11 @@ class EngineSupervisor(private val ctx: Context) {
         /** 引擎打印 "dsh web: <url>" 与健康检查通过之间的最大等待窗 */
         private const val WEB_URL_TIMEOUT_MS = 15_000L
 
-        /** spawn 之前等待上一个引擎退出的上限（实测优雅退出约 8 秒，留出余量） */
-        private const val SHUTDOWN_WAIT_SECONDS = 10L
+        /**
+         * spawn 之前等待上一个引擎退出的上限。
+         * 实测优雅退出约 8 秒；`EngineProcess.stop()` 的兜底是「TERM 后等 10 秒再强杀」，
+         * 取 12 秒覆盖到这个强杀点，超时就让原有的 EADDRINUSE 兜底接手。
+         */
+        private const val SHUTDOWN_WAIT_SECONDS = 12L
     }
 }
