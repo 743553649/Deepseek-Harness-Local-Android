@@ -40,6 +40,14 @@
 - **仓库不含 gradle wrapper**（`gradle-wrapper.jar` 是二进制，不入库）。
   CI 用 `gradle/actions/setup-gradle@v4` 直接提供 gradle 命令。
 
+- **流体云状态岛的三条生命周期不变量**（改回去就会复现僵尸胶囊 / ANR / 启动竞态，
+  详见 `docs/PITFALLS.md` H2~H4 与 I1）：
+  ① 岛通知必须**同时就是** `EngineService` 的前台服务通知（同一个 id）—— 换成普通 ongoing 通知，
+     进程被杀后胶囊会一直留在通知栏点不掉；
+  ② 退出路径停引擎必须**异步**（状态同步变更、只有 kill 与等待在后台），
+     且**不能**在 `spawnEngine()` 之前不等旧引擎退干净（~8 秒）—— 那是 EADDRINUSE 的来源；
+  ③ 别把 `START_NOT_STICKY` 改回 `START_STICKY`（用户要求"杀掉就停"，不再自我复活）。
+
 ---
 
 ## 开发循环
@@ -53,6 +61,11 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 - 构建约 **2-3 分钟**（运行时缓存命中后；缓存失效时约 20 分钟）
 - **先推 main 验证绿，再打 tag** —— tag 会走 `release` job，多一段失败面
 - 构建只是「编译通过」，**不等于功能可用**，见下
+- **分支推送不触发 CI**（workflow 只认 `main` 与 tag）：改代码走分支时用 `workflow_dispatch`
+  指定 `ref` 手动触发；**必须用 node 的 fetch 调 GitHub API，别用本机 `curl`**（封装会弄坏
+  Authorization 头，返回 401 Bad credentials）。token 在 `$DSH_HOME/.git-credentials`，别回显。
+- 拉产物：`node $DSH_HOME/tmp/dl-resume.js <run_id>`（断点续传；403 = 签名地址过期会自动换新）。
+  118MB 直连在弱网下会反复断，可改用加速站下 Release 附件（详见 `docs/PITFALLS.md` F3）。
 
 ---
 
@@ -68,6 +81,7 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 | 改动是否真进了二进制 | 解出 `classes*.dex` 后 `grep -a` 关键字（例：`--port`、`127.0.0.1:3180`） |
 | 引擎能否在指定端口起来 | 直接跑引擎加 `--port`，看监听端口与日志 |
 | 引擎为什么起不来 | 读 `/data/user/0/<pkg>/files/engine/engine.log` |
+| 流体云状态岛上显示什么 | `dumpsys notification --noredact`（判据与配方见 `docs/PITFALLS.md` H 节已修项 + **I 节：待修项 / 折叠与展开的字段对照表 / 验证命令**） |
 
 工具位置：`engine/extensions/android-buildtools/bin/{aapt2,apksigner}`（扩展中心的工具**不在 PATH 里**，要用绝对路径）。
 
@@ -104,7 +118,14 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 - 用户**不挂代理**，网络以国内直连为准。GitHub 直连实测可用；多数国内镜像已失效（详见 `docs/PITFALLS.md`）。
 - 用户手机上有**两个 App 并存**：官方的 `DSH Mobile`（装着全部真实会话数据，**一个字都别动**）和自编译的 `DSH Mobile Dev`。
   涉及「卸载」的操作**必须明确提醒别卸错**。
-- 长任务结束后推送系统通知：`notify "..."`。
+- 长任务结束后推送系统通知：`notify "..."`。⚠️ 官方版引擎的 `/notify` 有 G12 那个
+  「Content-Length 按字符读」的老 bug → **中文 body 必失败**（dev 版已修）；在官方版里发通知用英文，
+  或走 dev 版桥 `POST 127.0.0.1:3183/notify`。
+- 用户会**自己动手操作手机**（点设置开关、从最近任务划掉 App、按返回键）。观测到异常先把
+  `logcat -b events | grep -E 'am_proc_start|am_proc_died|am_kill'` 拉出来对时间线，**别急着当代码 bug**；
+  需要干净观测时，先请他这几分钟别碰手机。
+- **视觉类验收（胶囊长什么样、锁屏排版、文案顺不顺眼）只能由用户判断** —— Agent 可能读不了图片，
+  截图不等于看过；这类结论必须请用户确认，不能替他下。
 
 ---
 
