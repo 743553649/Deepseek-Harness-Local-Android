@@ -552,8 +552,12 @@
      不能只在 `post()` 里建。
   2. `START_STICKY` → **`START_NOT_STICKY`**：用户杀掉就停，不自我复活。
   3. 加 `onTaskRemoved()` → 与通知栏「退出」按钮同一个出口
-     （收岛 + 停引擎 + `stopSelf`）。副作用：**按返回键退出 App 也会停引擎**，
-     按 Home 键退到后台不受影响。
+     （收岛 + 停引擎 + `stopSelf`）。
+  4. `MainActivity.onBackPressed` 在 WebView 无历史时改走 **`moveTaskToBack(true)`**：
+     返回键只是"离开界面"（任务留在最近任务里 → `onTaskRemoved` 不触发 → 引擎与岛继续常驻），
+     只有**从最近任务划掉 / 强制停止**才算显式退出。
+     ⚠️ 不改这里的话，返回键会 finish 掉唯一的 Activity → 任务被移除 → `onTaskRemoved` →
+     引擎被停（用户明确不要这个行为）。
 - **顺序坑**：`exitCompletely()` 必须**先** `stopForeground(STOP_FOREGROUND_REMOVE)` **再** `hide()`；
   反过来的话，`cancel()` 的对象仍被前台服务持有 → 系统忽略 → 岛撤不掉。
 - **验证**：杀进程后进程/引擎/通知三者应同时消失；从最近任务划掉后同样；

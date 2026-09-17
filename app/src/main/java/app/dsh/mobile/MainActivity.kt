@@ -336,8 +336,11 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-        // WebView 有历史则先回退，保持类原生浏览体验
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+        // WebView 有历史则先回退，保持类原生浏览体验；
+        // 没有历史可退时**退到后台**，而不是结束任务（Termux 同款）。
+        // 区别很关键：结束任务会触发 EngineService.onTaskRemoved（= 用户显式退出：停引擎 + 收岛），
+        // 而按返回键只是"离开界面"，引擎与流体云应当继续常驻。
+        if (webView.canGoBack()) webView.goBack() else moveTaskToBack(true)
     }
 
     override fun onDestroy() {

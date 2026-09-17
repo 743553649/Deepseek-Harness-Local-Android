@@ -82,6 +82,9 @@ class EngineService : Service() {
      *
      * 不处理的话：进程虽被杀，但通知栏那条 ongoing 通知会留下（用户实测反馈）。
      * 这里与「退出」按钮走同一个出口，保证「图标没了 = 引擎停了 = 岛收了」三者一致。
+     *
+     * ⚠️ 与「按返回键」区分开：返回键走 MainActivity.moveTaskToBack（只退到后台，
+     * 任务仍留在最近任务里，本回调不触发），所以引擎与流体云继续常驻。
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         exitCompletely()
