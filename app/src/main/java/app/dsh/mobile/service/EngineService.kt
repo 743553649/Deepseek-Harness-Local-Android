@@ -11,16 +11,20 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import app.dsh.mobile.DshApp
-import app.dsh.mobile.LiveUpdateProbe
+import app.dsh.mobile.FluidCloud
 import app.dsh.mobile.MainActivity
 import app.dsh.mobile.R
+import app.dsh.mobile.engine.EngineConfig
 import app.dsh.mobile.engine.EngineSupervisor
+import app.dsh.mobile.engine.SessionWatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 引擎前台服务。
@@ -31,6 +35,7 @@ import kotlinx.coroutines.launch
 class EngineService : Service() {
 
     private var stateJob: Job? = null
+    private var islandJob: Job? = null
     private val stateScope by lazy { CoroutineScope(Dispatchers.Main) }
 
     override fun onCreate() {
@@ -56,8 +61,8 @@ class EngineService : Service() {
 
         app.supervisor.start(app.appScope)
 
-        // 【一次性探针 · 验证完即删】ColorOS 16 流体云可行性验证
-        LiveUpdateProbe.start(this)
+        // 流体云自动层（v1.2.27）：项目名 + 引擎状态 + agent 忙碌状态
+        startIslandLoop(app)
 
         // 状态回写到常驻通知
         if (stateJob == null) {
@@ -68,10 +73,46 @@ class EngineService : Service() {
         return START_STICKY
     }
 
+    /**
+     * 流体云自动层：每 5 秒算一次，优先于「就绪/工作中」这类基线文案。
+     *   - 引擎状态：启动中 / 引擎异常 / 就绪
+     *   - 项目名：最近有会话写入的项目；5 分钟内有写入的项目多于 1 个时显示「N 个项目」
+     *   - 忙碌：由引擎插件上报的 agent/status 决定（思考中、跑命令中都算忙）
+     * Agent 显式上报（island set/done）会盖住这一层，见 FluidCloud。
+     */
+    private fun startIslandLoop(app: DshApp) {
+        if (islandJob != null) return
+        islandJob = stateScope.launch {
+            val watcher = SessionWatcher(EngineConfig.dshHome(this@EngineService))
+            while (true) {
+                // 目录遍历放 IO 线程：主线程每 5 秒扫一次会话树会掉帧
+                val snapshot = withContext(Dispatchers.IO) {
+                    runCatching { watcher.snapshot() }.getOrNull()
+                }
+                val project = when {
+                    snapshot == null -> "DSH"
+                    snapshot.activeProjects > 1 -> "${snapshot.activeProjects} 个项目"
+                    else -> snapshot.project ?: "DSH"
+                }
+                when (app.supervisor.state.value) {
+                    is EngineSupervisor.State.Healthy ->
+                        FluidCloud.setAuto(this@EngineService, project, if (FluidCloud.isBusy()) "工作中" else "就绪")
+                    is EngineSupervisor.State.Backoff, is EngineSupervisor.State.Failed ->
+                        FluidCloud.setAuto(this@EngineService, "DSH", "引擎异常")
+                    else -> FluidCloud.setAuto(this@EngineService, "DSH", "启动中")
+                }
+                delay(ISLAND_INTERVAL_MS)
+            }
+        }
+    }
+
     override fun onDestroy() {
         stateJob?.cancel()
         stateJob = null
+        islandJob?.cancel()
+        islandJob = null
         stateScope.cancel()
+        FluidCloud.hide(this)
         (application as DshApp).supervisor.stop()
         super.onDestroy()
     }
@@ -148,6 +189,9 @@ class EngineService : Service() {
     private fun exitCompletely() {
         stateJob?.cancel()
         stateJob = null
+        islandJob?.cancel()
+        islandJob = null
+        FluidCloud.hide(this)
         (application as DshApp).supervisor.stop()
         if (Build.VERSION.SDK_INT >= 33) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -161,6 +205,9 @@ class EngineService : Service() {
     companion object {
         private const val CHANNEL_ID = "engine"
         private const val NOTIF_ID = 42
+
+        /** 流体云自动层刷新间隔（用户选定：事件驱动 + 最低 5 秒节流） */
+        private const val ISLAND_INTERVAL_MS = 5_000L
 
         /** 通知「退出」按钮触发动作 */
         const val ACTION_EXIT = "app.dsh.mobile.service.action.EXIT"

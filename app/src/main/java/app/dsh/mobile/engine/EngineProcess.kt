@@ -150,14 +150,17 @@ class EngineProcess private constructor(
             logFile: File,
             suPath: String? = null,
             port: Int = EngineConfig.DEFAULT_PORT,
+            patchFile: File? = null,
         ): EngineProcess {
             var cmd = nodeBin.absolutePath
             // 端口必须走 CLI 参数：引擎只解析 `--port`（@deepseek-ai/dsh-web-app/startup.js），
             // 完全不读 PORT 环境变量。
             // 血泪事故：共存版只把 PORT 环境变量改成 3180，引擎仍监听默认 3080 →
             // 与官方版抢端口 → EADDRINUSE → 无限重启「进程异常退出」。
-            var args = arrayOf("--expose-internals", entryJs.absolutePath, "web", "--no-open",
-                "--port", port.toString())
+            // `--patch` 是顶层选项，必须排在 `web` 子命令**之前**（v1.2.27 流体云插件补丁层）。
+            var args = mutableListOf("--expose-internals", entryJs.absolutePath)
+            if (patchFile != null) args += listOf("--patch", patchFile.absolutePath)
+            args += listOf("web", "--no-open", "--port", port.toString())
             if (suPath != null) {
                 // Root 整体提权：以 su -c 'exec node ...' 启动。
                 // env 已由调用方按 DSH_ANDROID_PRIV_MODE=ROOT 组装好，su 子进程继承。
@@ -166,11 +169,11 @@ class EngineProcess private constructor(
                 args.forEach { inner.append(' ').append(shellQuote(it)) }
                 cmd = suPath
                 inner.insert(0, "cd " + shellQuote(cwd.absolutePath) + " && ")
-                args = arrayOf("-c", inner.toString())
+                args = mutableListOf("-c", inner.toString())
             }
             val fd = Pty.nativeForkPty(
                 cmd = cmd,
-                args = args,
+                args = args.toTypedArray(),
                 cwd = cwd.absolutePath,
                 env = env,
                 rows = 40,

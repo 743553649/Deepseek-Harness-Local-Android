@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import app.dsh.mobile.DshAccessibilityService
+import app.dsh.mobile.FluidCloud
 import app.dsh.mobile.R
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -24,6 +25,7 @@ import java.nio.charset.StandardCharsets
  *
  * 路由：
  *   POST /notify        body: {"title":"...", "body":"..."}          → Android 系统通知
+ *   POST /island        body: {"action":"set|done|clear|status",...} → ColorOS 16 流体云状态岛
  *   GET  /screen        → 当前屏幕可见文本+坐标 JSON（需无障碍服务已开启）
  *   POST /tap           body: {"x":123,"y":456} 或 {"text":"确定"}   → 模拟点击（需无障碍服务）
  *   GET  /ext/list      → 扩展清单+三态 JSON（v1.2.1）
@@ -133,6 +135,7 @@ object AgentBridge {
     private fun route(ctx: Context, method: String, path: String, body: String): Pair<Int, String> {
         return when {
             method == "POST" && path == "/notify" -> notify(ctx, body)
+            method == "POST" && path == "/island" -> island(ctx, body)
             method == "GET" && path == "/screen" -> screen()
             method == "POST" && path == "/tap" -> tap(body)
             method == "GET" && path == "/ext/list" -> extList(ctx)
@@ -289,6 +292,36 @@ document.getElementById('api').textContent = checks.map(function(c){
             }
         }, "ext-install-$id").apply { isDaemon = true; start() }
         return 202 to """{"ok":true,"state":"installing","message":"download started; poll GET /ext/list until state=green, then remind user to restart engine"}"""
+    }
+
+    /**
+     * POST /island → ColorOS 16 流体云状态岛（Android 16 live update）。
+     * body 四种 action：
+     *   {"action":"status","status":"running|idle"}   ← 引擎插件自动上报（思考中/执行中都算 running）
+     *   {"action":"set","title":"正在改 X","text":"可选","progress":60}
+     *   {"action":"done","text":"可选"}                ← 常驻「✓ 完成」直到下一次任务开始
+     *   {"action":"clear"}                             ← 撤掉 Agent 上报层，回到自动层
+     * Android 16 以下没有这套 API → 返回 ok:false，调用方（island 命令）据此提示，不报错崩溃。
+     */
+    private fun island(ctx: Context, body: String): Pair<Int, String> {
+        if (!FluidCloud.supported) {
+            return 200 to """{"ok":false,"error":"需要 Android 16（ColorOS 16）才有流体云"}"""
+        }
+        val obj = runCatching { JSONObject(body) }.getOrNull()
+            ?: return 400 to """{"ok":false,"error":"body must be JSON"}"""
+        when (obj.optString("action")) {
+            "status" -> FluidCloud.onAgentStatus(ctx, obj.optString("status"))
+            "set" -> FluidCloud.report(
+                ctx,
+                obj.optString("title").ifEmpty { "Agent 工作中" },
+                obj.optString("text").takeIf { it.isNotEmpty() },
+                if (obj.has("progress")) obj.optInt("progress") else null,
+            )
+            "done" -> FluidCloud.done(ctx, obj.optString("text").takeIf { it.isNotEmpty() })
+            "clear" -> FluidCloud.clearAgent(ctx)
+            else -> return 400 to """{"ok":false,"error":"unknown action"}"""
+        }
+        return 200 to """{"ok":true}"""
     }
 
     /** POST /notify → 系统通知（任务完成推送） */
