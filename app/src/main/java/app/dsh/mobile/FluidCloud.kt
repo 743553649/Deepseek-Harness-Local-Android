@@ -49,14 +49,14 @@ object FluidCloud {
     private var agentText: String? = null
     private var agentPercent: Int? = null
 
-    /** 自动层文案（项目名 / 引擎状态），由 EngineService 定期写入 */
+    /** 自动层文案（项目名 + 状态词），由 EngineService 定期写入 */
     private var autoTitle: String = ""
-    private var autoCritical: String = ""
+    private var autoIdleWord: String = ""
+    /** 忙碌时替换成这个词；null = 该状态不随忙碌切换（启动中 / 引擎异常） */
+    private var autoBusyWord: String? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private var refreshScheduled = false
-
-    fun isBusy(): Boolean = engineBusy
 
     /**
      * 引擎插件上报的 agent 状态（`"running"` / `"idle"`）。
@@ -71,11 +71,16 @@ object FluidCloud {
         render(ctx)
     }
 
-    /** 自动层：项目名 + 状态词（"就绪" / "工作中" / "启动中" / "引擎异常"） */
-    fun setAuto(ctx: Context, title: String, critical: String) {
-        if (title == autoTitle && critical == autoCritical) return
+    /**
+     * 自动层：项目名 + 空闲词 + 忙碌词。
+     * 忙碌词为 null 表示该状态不随忙碌切换（启动中 / 引擎异常）。
+     * 忙碌词在本对象内拼，是为了让 agent/status 一到就立刻反映，而不是等下一次轮询。
+     */
+    fun setAuto(ctx: Context, title: String, idleWord: String, busyWord: String? = null) {
+        if (title == autoTitle && idleWord == autoIdleWord && busyWord == autoBusyWord) return
         autoTitle = title
-        autoCritical = critical
+        autoIdleWord = idleWord
+        autoBusyWord = busyWord
         render(ctx)
     }
 
@@ -107,7 +112,8 @@ object FluidCloud {
         clearAgentLayer()
         engineBusy = false
         autoTitle = ""
-        autoCritical = ""
+        autoIdleWord = ""
+        autoBusyWord = null
         handler.removeCallbacksAndMessages(null)
         refreshScheduled = false
         runCatching {
@@ -134,7 +140,8 @@ object FluidCloud {
         val built = if (title != null) {
             post(ctx, title, agentCritical ?: "工作中", agentText, agentPercent)
         } else {
-            post(ctx, autoTitle.ifEmpty { "DSH 就绪" }, autoCritical, null, null)
+            val word = if (engineBusy) autoBusyWord ?: autoIdleWord else autoIdleWord
+            post(ctx, autoTitle.ifEmpty { "DSH 就绪" }, word, null, null)
         }
         if (!built || !allowRefresh || refreshScheduled) return
         // 补刷一帧：首帧常拿不到 promoted 标志（实测），补一次即可上岛

@@ -95,8 +95,9 @@ class EngineService : Service() {
                     else -> snapshot.project ?: "DSH"
                 }
                 when (app.supervisor.state.value) {
+                    // 忙碌词交给 FluidCloud 拼：agent/status 一到就立刻反映，不必等这轮轮询
                     is EngineSupervisor.State.Healthy ->
-                        FluidCloud.setAuto(this@EngineService, project, if (FluidCloud.isBusy()) "工作中" else "就绪")
+                        FluidCloud.setAuto(this@EngineService, project, "就绪", "工作中")
                     is EngineSupervisor.State.Backoff, is EngineSupervisor.State.Failed ->
                         FluidCloud.setAuto(this@EngineService, "DSH", "引擎异常")
                     else -> FluidCloud.setAuto(this@EngineService, "DSH", "启动中")
