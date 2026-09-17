@@ -27,7 +27,8 @@ class SessionWatcherTest {
         fileName: String = "session.v3.jsonl.zstd",
         mtime: Long = System.currentTimeMillis(),
     ): File {
-        val home = tmp.newFolder("dsh-home")
+        // 注意用无参 newFolder()：带名字的版本在同一个测试里调第二次会因目录已存在而抛异常（CI 实测踩到）
+        val home = tmp.newFolder()
         val f = File(File(File(home, "sessions"), projectDir), sessionDir).apply { mkdirs() }
         File(f, fileName).writeText("x")
         File(f, fileName).setLastModified(mtime)
