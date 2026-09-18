@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底栏选中态药丸：深色液体块，在几个格子间平移。
-     铺满底栏后它是一块圆角方块（不再是小药丸），所以圆角收小一档。 -->
+<!-- 底栏选中态：深色胶囊（圆角给超大值 = 自动取高度的一半，永远是个规规矩矩的胶囊）。
+     之前是一块 18dp 圆角的大方块、离屏幕边缘只有 4dp，在白底栏上贴着屏幕左下/右下角很割裂；
+     现在靠底栏的内边距把它缩成居中胶囊、四面都留出余量。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
@@ -8,5 +9,5 @@
         android:endColor="#CC12151A"
         android:startColor="#F012151A"
         android:type="linear" />
-    <corners android:radius="18dp" />
+    <corners android:radius="999dp" />
 </shape>
