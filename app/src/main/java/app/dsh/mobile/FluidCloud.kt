@@ -82,6 +82,32 @@ object FluidCloud {
     private var agentUpdatedAt = 0L
     private var agentIsDone = false
 
+    /**
+     * 用户"当前正在用的会话"（引擎侧插件在用户发消息 / Agent 状态变化时上报，v1.2.31）。
+     *
+     * 用途：**只影响自动层的项目名** —— 让岛上显示"你正在弄的那个项目"，
+     * 而不是"最近有写入的项目"（后者在两个项目都活跃时会指错，用户实测）。
+     * null = 还不知道，回落到 SessionWatcher 的启发式。三层优先级不受它影响。
+     */
+    @Volatile
+    var activeSessionId: String? = null
+        private set
+
+    /** 会话变化时的回调（EngineService 注册：立刻用新项目名刷岛，不等 5 秒轮询） */
+    @Volatile
+    private var onSessionChanged: (() -> Unit)? = null
+
+    fun setSessionListener(listener: (() -> Unit)?) {
+        onSessionChanged = listener
+    }
+
+    /** 引擎侧插件上报：用户在某会话里发消息 / Agent 在跑 */
+    fun setActiveSession(sessionId: String) {
+        if (sessionId.isEmpty() || sessionId == activeSessionId) return
+        activeSessionId = sessionId
+        onSessionChanged?.invoke()
+    }
+
     /** 自动层文案（项目名 + 状态词），由 EngineService 定期写入 */
     private var autoTitle: String = ""
     private var autoIdleWord: String = ""
@@ -188,7 +214,19 @@ object FluidCloud {
         // startForeground 要求通知渠道**已存在**，否则这条通知根本不显示
         // （此时还没跑过任何一轮 render，post() 里的建渠道还没执行过）
         ensureChannel(ctx)
-        return build(ctx, ctx.getString(R.string.island_dsh), ctx.getString(R.string.island_starting), null, null)
+        // 【v1.2.30 修 / 真机实测】服务被"再启动"时必须复用**当前内容**，不能照贴写死的首帧
+        // 「启动中」：MainActivity.onResume() 每次都调 EngineService.start()，于是用户每次切回
+        // App，岛上就会闪一下「启动中」，直到下一次自动层轮询（最长 5 秒）才纠正回来
+        // ——用户报"时不时出现启动中"，就是这里。真正冷启动时下列内容都还是空的，仍然显示「启动中」。
+        val title = agentTitle
+        return when {
+            title != null ->
+                build(ctx, title, agentCritical ?: ctx.getString(R.string.island_busy), agentText, agentPercent)
+            autoTitle.isNotEmpty() ->
+                build(ctx, autoTitle, if (engineBusy) autoBusyWord ?: autoIdleWord else autoIdleWord, null, null)
+            else ->
+                build(ctx, ctx.getString(R.string.island_dsh), ctx.getString(R.string.island_starting), null, null)
+        }
     }
 
     /** 建渠道（幂等：同 id 重复创建是 no-op，不会覆盖用户改过的设置） */

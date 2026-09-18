@@ -146,9 +146,9 @@ scripts/
 | `engine/Privilege.kt` | 244 | NORMAL / SHIZUKU / ROOT 三模式探测与切换，dsh-home 保护 | 改权限模式 |
 | `OnboardingActivity.kt` | 232 | 首次启动引导 | 改引导流程 |
 | `engine/RuntimeInstaller.kt` | 208 | 安装 `assets/runtime.zip`（或 MANIFEST 远程包） | 改安装逻辑 |
-| `FluidCloud.kt` | 303 | **流体云状态岛**：三层优先级（Agent 上报 > 引擎忙碌 > 自动层）、过期回落、设置开关、岛通知即前台服务通知；折叠态文案 = `动作 空格 百分比`（v1.2.30 I3，动态拼不写死） | 改岛上显示什么 |
-| `service/EngineService.kt` | 346 | 前台服务：保活 + **岛自动层（状态一变立刻刷 + 5 秒轮询兜底，v1.2.30 I2）** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
-| `engine/SessionWatcher.kt` | 79 | 会话活动探测（只 stat 文件拿「项目名 + 活跃项目数」，不解压不读内容） | 改岛的项目名来源 |
+| `FluidCloud.kt` | 341 | **流体云状态岛**：三层优先级（Agent 上报 > 引擎忙碌 > 自动层）、过期回落、设置开关、岛通知即前台服务通知；折叠态文案 = `动作 空格 百分比`（v1.2.30 I3，动态拼不写死） | 改岛上显示什么 |
+| `service/EngineService.kt` | 375 | 前台服务：保活 + **岛自动层（状态一变立刻刷 + 5 秒轮询兜底，v1.2.30 I2）** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
+| `engine/SessionWatcher.kt` | 111 | 会话活动探测（只 stat 文件拿「项目名 + 活跃项目数」，不解压不读内容） | 改岛的项目名来源 |
 | `src/test/.../SessionWatcherTest.kt` | 93 | SessionWatcher 的 JVM 单测（目录名解码 / 文件名版本差异 / 活跃窗口） | 改探测逻辑时同步补 |
 | `engine/EngineProcess.kt` | 204 | fork + exec 引擎进程（`--port` 在这里）；**扫描 stdout 捕获 `dsh web:` 入口** | 改启动参数 |
 | `DshAccessibilityService.kt` | 153 | 无障碍服务（模拟点击/滑动） | 改读屏点击 |
@@ -222,15 +222,20 @@ WebView.loadUrl(webUrl)
 ### 流体云状态上报（v1.2.27+，`FluidCloud`）
 
 ```
-引擎进程内插件 profiles/web/fluid-cloud.mjs（App 每次启动重写；经 --patch 注入）
+引擎进程内插件 profiles/web/fluid-cloud.mjs（源码在 assets/fluid-cloud.mjs，App 每次启动复制并注入 --patch）
   ├─ 订阅 agent/status（running/idle）→ POST 127.0.0.1:3183/island {"action":"status",...}
-  └─ 每 3 秒把 sessions/<项目>/ 与 <项目>/<会话>/ 两级 chmod 0755
-         （root 模式下引擎以 uid 0 建目录是 0700，App 进程读不到 → 岛上项目名会退化）
+  ├─ 订阅 api-session/activity + 取 agent/status 的 payload.agent.id（就是 SessionId）
+  │    → POST {"action":"active-session"}：告诉 App"用户此刻在用哪个会话"（v1.2.31，岛上的项目名据此选）
+  └─ 每 3 秒把 sessions/<项目>/、<项目>/<会话>/ chmod 0755，
+     以及 storages/ 0755 + storages/workspace.json 0644（App 要读这张表做"会话 id → 项目名"）
+         （root 模式下引擎以 uid 0 建的文件是 0700/0600，App 进程读不到 → 岛上项目名会退化）
         ↓
 AgentBridge POST /island → FluidCloud 三层优先级
         ① Agent 显式上报（island set/done；引擎空闲且 10 分钟无更新则回落自动层）
         ② 引擎忙碌态（插件上报的 running/idle）
-        ③ 自动层（EngineService 每 5 秒写入：项目名 / N 个项目 + 就绪·工作中·启动中·引擎异常）
+        ③ 自动层（EngineService 写：项目名 + 就绪·工作中·启动中·引擎异常；**状态一变立刻写 + 5 秒轮询兜底**）
+           项目名优先取"当前在用的会话"（SessionWatcher.projectOfSession 读 storages/workspace.json），
+           取不到才回落到"最近有写入的项目 / N 个项目"
         ↓
 NotificationManager.notify(4242, ProgressStyle + setShortCriticalText + extras["android.requestPromotedOngoing"])
         ↓
@@ -240,7 +245,8 @@ ColorOS 16 流体云胶囊（该通知**同时就是 EngineService 的前台服�
 - 设置页「流体云状态岛」开关（`dsh_ui/island_enabled`）关掉 → 退回普通前台通知，**不重启引擎**。
 - 无通知权限 / 系统不支持时同样退回普通前台通知（否则岛会卡在首帧「启动中」）。
 - 折叠态只显示：左 = 小图标，右 = `shortCriticalText`（就绪/工作中/45%）；标题与进度条正文只在**展开态**可见。
-- 判定与验证配方见 `docs/PITFALLS.md` H 节（已修项）与 **I 节**（待修项 + 折叠/展开字段对照表）。
+- 「退出」的语义（v1.2.31）：停引擎 → 收岛 → 停服务 → **等引擎优雅停完再杀掉 App 进程**（用户要求"退出就是退出"）。
+- 判定与验证配方见 `docs/PITFALLS.md` H 节（已修项）与 **I 节**（I1~I6 + 折叠/展开字段对照表）。
 
 ---
 

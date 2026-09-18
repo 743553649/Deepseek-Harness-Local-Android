@@ -1,5 +1,6 @@
 package app.dsh.mobile.engine
 
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -49,6 +50,37 @@ class SessionWatcher(private val home: File) {
         }
         return Snapshot(newestDir?.let { decodeName(it.name) }, active)
     }
+
+    /**
+     * 会话 id → 它所属工作区的**标题**（读 DSH_HOME/storages/workspace.json）。
+     *
+     * 用途（v1.2.31）：岛上优先显示"你正在用的那个会话的项目"。引擎侧插件把
+     * 「用户发消息的会话 id」「Agent 正在跑的会话 id」报给 App，这里把它翻译成工作区标题。
+     * 读不到（文件不存在 / root 属主读不了 / 没有匹配）就返回 null，
+     * 调用方回落到 [snapshot] 的"最近有写入的项目"，不抛异常。
+     */
+    fun projectOfSession(sessionId: String): String? {
+        val key = normalizeSessionId(sessionId)
+        if (key.isEmpty()) return null
+        val root = runCatching {
+            JSONObject(File(home, "storages/workspace.json").readText())
+        }.getOrNull() ?: return null
+        val workspaces = root.optJSONObject("tables")?.optJSONObject("workspaces") ?: return null
+        for (id in workspaces.keys()) {
+            val ws = workspaces.optJSONObject(id) ?: continue
+            val ids = ws.optJSONArray("sessionIds") ?: continue
+            for (i in 0 until ids.length()) {
+                if (normalizeSessionId(ids.optString(i)) != key) continue
+                val path = ws.optString("path")
+                val title = ws.optString("title").ifEmpty { path.substringAfterLast("/") }
+                return title.ifEmpty { null }
+            }
+        }
+        return null
+    }
+
+    /** 各处的会话 id 写法可能带/不带 session- 前缀，比较前统一去掉 */
+    private fun normalizeSessionId(id: String): String = id.removePrefix("session-")
 
     /** 目录名 → 可显示的项目名（取路径最后一段） */
     private fun decodeName(encoded: String): String {

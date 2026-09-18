@@ -40,15 +40,20 @@
 - **仓库不含 gradle wrapper**（`gradle-wrapper.jar` 是二进制，不入库）。
   CI 用 `gradle/actions/setup-gradle@v4` 直接提供 gradle 命令。
 
-- **流体云状态岛的三条生命周期不变量**（改回去就会复现僵尸胶囊 / ANR / 启动竞态，
-  详见 `docs/PITFALLS.md` H2~H4 与 I1）：
+- **流体云状态岛的生命周期不变量**（改回去就会复现僵尸胶囊 / ANR / 启动竞态 / 提示闪变，
+  详见 `docs/PITFALLS.md` H2~H4 与 I1~I6）：
   ① 岛通知必须**同时就是** `EngineService` 的前台服务通知（同一个 id）—— 换成普通 ongoing 通知，
      进程被杀后胶囊会一直留在通知栏点不掉；
   ② 退出路径停引擎必须**异步**（状态同步变更、只有 kill 与等待在后台），
      且**停引擎的收尾工作没跑完之前不能 `spawnEngine()`**（等 `pendingShutdown` 那个 future，
      不是等进程退出）—— `EngineProcess.stop()` 的强杀走的是**全局 PTY 句柄**，
      新引擎先起来就会被打死（v1.2.30 真机实测，详见 `docs/PITFALLS.md` I1）；
-  ③ 别把 `START_NOT_STICKY` 改回 `START_STICKY`（用户要求"杀掉就停"，不再自我复活）。
+  ③ 别把 `START_NOT_STICKY` 改回 `START_STICKY`（用户要求"杀掉就停"，不再自我复活）；
+  ④ 服务被"再启动"时（`MainActivity.onResume()` 每次都调 `EngineService.start()`），
+     前台通知**必须复用当前内容**（`FluidCloud.foregroundNotification`）——
+     照贴写死的首帧「启动中」，用户每次切回 App 都会看到它闪一下（v1.2.31 I4）；
+  ⑤ 「退出」的语义是**退出 App**：先等引擎优雅停完（`onShutdownFinished`）再 `Process.killProcess`，
+     顺序不能反（先杀进程 = 引擎来不及 flush 会话），见 `docs/PITFALLS.md` I6。
 
 ---
 
@@ -83,7 +88,7 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 | 改动是否真进了二进制 | 解出 `classes*.dex` 后 `grep -a` 关键字（例：`--port`、`127.0.0.1:3180`） |
 | 引擎能否在指定端口起来 | 直接跑引擎加 `--port`，看监听端口与日志 |
 | 引擎为什么起不来 | 读 `/data/user/0/<pkg>/files/engine/engine.log` |
-| 流体云状态岛上显示什么 | `dumpsys notification --noredact`（判据与配方见 `docs/PITFALLS.md` H 节已修项 + **I 节：v1.2.30 修掉的 I1~I3 / 折叠与展开的字段对照表 / 验证命令**） |
+| 流体云状态岛上显示什么 | `dumpsys notification --noredact`（判据与配方见 `docs/PITFALLS.md` H 节已修项 + **I 节：v1.2.30~v1.2.31 修掉的 I1~I6 / 折叠与展开的字段对照表 / 验证命令**） |
 
 工具位置：`engine/extensions/android-buildtools/bin/{aapt2,apksigner}`（扩展中心的工具**不在 PATH 里**，要用绝对路径）。
 
@@ -136,5 +141,5 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 - **`docs/ARCHITECTURE.md`** —— 导航：引擎启动链路、目录布局、端口分配、**关键文件职责表**、
   四条数据流（含流体云上报）、CI 流水线、与上游的差异清单（改前先查这里找「该改哪个文件」）
 - **`docs/PITFALLS.md`** —— 踩坑记录（A~I 节，格式：现象 → 根因 → 修法 → 验证）；
-  **I 节 = v1.2.30 修掉的 I1~I3（含根因）+ 折叠/展开的字段对照表 + 真机验证配方**
+  **I 节 = v1.2.30~v1.2.31 修掉的 I1~I6（含根因）+ 折叠/展开的字段对照表 + 真机验证配方**
 - `README.md` / `README_EN.md` —— 面向用户的产品说明

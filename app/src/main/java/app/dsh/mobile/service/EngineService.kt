@@ -11,6 +11,8 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Process
+import android.util.Log
 import app.dsh.mobile.DshApp
 import app.dsh.mobile.FluidCloud
 import app.dsh.mobile.MainActivity
@@ -72,6 +74,10 @@ class EngineService : Service() {
 
         // 流体云自动层（v1.2.27）：项目名 + 引擎状态 + agent 忙碌状态
         startIslandLoop(app)
+        // 用户切到别的会话 / Agent 开始干活 → 立刻用新项目名刷岛（不等 5 秒轮询，同 I2 的教训）
+        FluidCloud.setSessionListener {
+            stateScope.launch { applyIslandAuto(app) }
+        }
 
         // 状态回写到常驻通知（仅 SDK<36 的老系统；有流体云时同一条通知由岛自己维护），
         // 并且【v1.2.30 / I2】状态一变就立刻刷岛 —— 岛上文案不能再等 5 秒轮询。
@@ -119,11 +125,16 @@ class EngineService : Service() {
      */
     private suspend fun applyIslandAuto(app: DshApp) {
         val watcher = islandWatcher ?: SessionWatcher(EngineConfig.dshHome(this)).also { islandWatcher = it }
-        // 目录遍历放 IO 线程：主线程每 5 秒扫一次会话树会掉帧
-        val snapshot = withContext(Dispatchers.IO) {
-            runCatching { watcher.snapshot() }.getOrNull()
+        // 目录遍历 + 读工作区清单都放 IO 线程：主线程每 5 秒扫一次会话树会掉帧
+        val activeSession = FluidCloud.activeSessionId
+        val (snapshot, sessionProject) = withContext(Dispatchers.IO) {
+            runCatching { watcher.snapshot() }.getOrNull() to
+                activeSession?.let { id -> runCatching { watcher.projectOfSession(id) }.getOrNull() }
         }
-        val project = when {
+        // 【v1.2.31】优先显示"用户当前在用的那个会话"的项目名（引擎侧插件上报会话 id，
+        // 再查工作区清单翻译成标题）—— 实测只看"最近有写入"会在两个项目都活跃时指错。
+        // 查不到（插件没报 / 清单读不了 / 没匹配）就回落到原来那套启发式。
+        val project = sessionProject ?: when {
             snapshot == null -> getString(R.string.island_dsh)
             snapshot.activeProjects > 1 ->
                 getString(R.string.island_projects, snapshot.activeProjects)
@@ -172,6 +183,7 @@ class EngineService : Service() {
         stateJob = null
         islandJob?.cancel()
         islandJob = null
+        FluidCloud.setSessionListener(null)
         stateScope.cancel()
         FluidCloud.hide(this)
         stopEngineAsync()
@@ -290,12 +302,20 @@ class EngineService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(text))
     }
 
-    /** 彻底退出：杀引擎 → 移除通知 → 停服务（onDestroy 里的兜底清理幂等） */
+    /**
+     * 彻底退出：停引擎 → 移除通知 → 停服务 → **连 App 进程一起杀掉**（v1.2.31 用户要求）。
+     *
+     * 用户原话：点「退出」要的是"退出 App"，而不是只把引擎停掉、App 还挂在后台。
+     * 顺序要紧：先让引擎优雅停完（flush 会话，最多 15 秒）**再**杀进程 ——
+     * 一上来就杀会让引擎来不及落盘（它只是被 PTY 断开带走的）。
+     * 等待期间用户若又打开了 App，监督器会重新在跑，那时就不杀了（见回调里的判断）。
+     */
     private fun exitCompletely() {
         stateJob?.cancel()
         stateJob = null
         islandJob?.cancel()
         islandJob = null
+        FluidCloud.setSessionListener(null)
         // 顺序要紧：先撤前台服务通知（岛就是它），再 hide() 兜底。
         // 反过来会先 cancel 一条仍被前台服务持有的通知 —— 系统会忽略，岛就撤不掉了。
         if (Build.VERSION.SDK_INT >= 33) {
@@ -306,10 +326,19 @@ class EngineService : Service() {
         }
         FluidCloud.hide(this)
         stopEngineAsync()
+        val app = application as DshApp
+        app.supervisor.onShutdownFinished(app.appScope) {
+            // 期间用户又把 App 打开（监督器重新在跑）= 改主意了 → 不杀
+            if (!app.supervisor.running) {
+                Log.i(TAG, "engine stopped; killing app process (user asked for full exit)")
+                Process.killProcess(Process.myPid())
+            }
+        }
         stopSelf()
     }
 
     companion object {
+        private const val TAG = "EngineService"
         private const val CHANNEL_ID = "engine"
         private const val NOTIF_ID = 42
 
