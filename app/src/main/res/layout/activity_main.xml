@@ -10,9 +10,9 @@
     ├─ 竖向 LinearLayout
     │   ├─ pageHost（weight=1，装三个页面，同一时刻只显示一个）
     │   │   ├─ chatPage（白底 + WebView）
-    │   │   ├─ settingsPage / extensionsPage（include 进来的两个页面，透明底）
+    │   │   ├─ settingsPage / extensionsPage / aboutPage（include 进来的三个页面，透明底）
     │   │   ├─ loading（引擎就绪前的加载页：只盖对话页，不盖底栏，也不盖设置/扩展）
-    │   └─ navArea（72dp 占位区，里面是悬浮玻璃岛）
+    │   └─ navArea（72dp 占位区，里面是铺满底栏的玻璃条；加载完成前整体隐藏）
     └─ capsule（对话页顶部小胶囊：引擎未就绪时说明原因 / 预览模式时变「← 主页」）
 
   ⚠️ 底栏绝不能盖住网页的输入框（docs/UI-REDESIGN.md §4.2）：
@@ -119,6 +119,13 @@
                 android:layout_height="match_parent"
                 android:visibility="gone" />
 
+            <include
+                android:id="@+id/aboutPage"
+                layout="@layout/view_about"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
         </FrameLayout>
 
         <!-- 底栏占位区：72dp（含底部 14dp 间距）。
@@ -129,19 +136,21 @@
             android:layout_height="72dp"
             android:clipChildren="false">
 
-            <!-- 悬浮玻璃岛：174×45dp，圆角 24dp -->
+            <!-- 玻璃条：铺满底栏（左右各留 12dp，仍是圆角悬浮块），45dp 高，圆角 24dp -->
             <FrameLayout
-                android:id="@+id/navIsland"
-                android:layout_width="174dp"
+                android:id="@+id/navBar"
+                android:layout_width="match_parent"
                 android:layout_height="45dp"
                 android:layout_gravity="top|center_horizontal"
+                android:layout_marginStart="12dp"
                 android:layout_marginTop="13dp"
-                android:background="@drawable/bg_glass_island"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/bg_glass_bar"
                 android:clipChildren="false"
                 android:elevation="12dp"
                 android:padding="3dp">
 
-                <!-- 选中态药丸：宽度在代码里按岛内容宽 / 3 算，别写死 dp -->
+                <!-- 选中态药丸：宽度在代码里按玻璃条内容宽 / 格子数 算，别写死 dp -->
                 <View
                     android:id="@+id/navPill"
                     android:layout_width="0dp"
@@ -225,6 +234,31 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="1dp"
                             android:text="@string/nav_settings"
+                            android:textColor="@color/nav_off"
+                            android:textSize="9.5sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/navAbout"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:id="@+id/navAboutIcon"
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_nav_about" />
+
+                        <TextView
+                            android:id="@+id/navAboutText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="1dp"
+                            android:text="@string/nav_about"
                             android:textColor="@color/nav_off"
                             android:textSize="9.5sp" />
                     </LinearLayout>

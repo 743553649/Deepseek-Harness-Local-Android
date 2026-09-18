@@ -3,7 +3,8 @@
   设置页（第 2 步：并进 MainActivity，作为底栏三页之一）。
   与第 1 步的区别：没有顶部返回栏（底栏常驻，靠底栏切回来），底色透明 ——
   页面底色由 MainActivity 根节点的渐变统一提供，这样切页时不会出现两层渐变。
-  结构：引擎卡片（主角）→ 显示 → 权限中心 → 关于。
+  结构：引擎卡片（主角）→ 显示 → 权限中心。
+  （「关于」已按用户要求单独占底栏一格，见 view_about.xml）
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -373,91 +374,5 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- ============ 关于（原独立「关于」页已并进这里） ============ -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_marginTop="22dp"
-            android:layout_marginBottom="9dp"
-            android:text="@string/settings_section_about"
-            android:textColor="@color/section"
-            android:textSize="11.5sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_glass_card"
-            android:orientation="vertical">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/about_app_name"
-                    android:textColor="@color/ink"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/valAboutVersion"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="monospace"
-                    android:textColor="@color/muted"
-                    android:textSize="12.5sp" />
-            </LinearLayout>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginHorizontal="16dp"
-                android:background="@color/hair" />
-
-            <!-- 开源地址：点击复制（与原「关于」页行为一致） -->
-            <LinearLayout
-                android:id="@+id/rowRepo"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:background="?android:attr/selectableItemBackground"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/about_open_source"
-                    android:textColor="@color/ink"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:layout_weight="1"
-                    android:ellipsize="middle"
-                    android:fontFamily="monospace"
-                    android:gravity="end"
-                    android:singleLine="true"
-                    android:text="@string/about_repo"
-                    android:textColor="@color/muted"
-                    android:textSize="12.5sp" />
-
-                <ImageView
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:layout_marginStart="6dp"
-                    android:importantForAccessibility="no"
-                    android:src="@drawable/ic_chevron" />
-            </LinearLayout>
-        </LinearLayout>
     </LinearLayout>
 </ScrollView>

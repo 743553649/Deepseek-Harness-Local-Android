@@ -35,14 +35,8 @@
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
-        <!-- 关于页：内容已并进设置页的「关于」区块，界面里已无入口（死代码，留着不删） -->
-        <activity
-            android:name=".AboutActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
-
-        <!-- 设置页 / 扩展中心（v1.2.36）：已并成 MainActivity 内的两个页面（底栏常驻），
-             不再是独立 Activity —— 对应的 <activity> 条目已删除。 -->
+        <!-- 设置页 / 扩展中心 / 关于（v1.2.36 起）：都并成了 MainActivity 里的页面
+             （底栏常驻、切换平滑），不再是独立 Activity —— 原先的 <activity> 条目已删除。 -->
 
         <service
             android:name=".service.EngineService"

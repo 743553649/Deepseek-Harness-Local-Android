@@ -8,13 +8,11 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.PorterDuff
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.animation.PathInterpolator
@@ -35,7 +33,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * 主界面：底栏三页合一（对话 / 扩展 / 设置）。
+ * 主界面：底栏四页合一（对话 / 扩展 / 设置 / 关于）。
  *
  * UI 策略：不重写官方 WebUI（上游 developer preview 迭代快，追协议是无底洞），
  * 只做原生外壳 —— 引擎 Healthy 后加载 127.0.0.1 回环页面。
@@ -55,17 +53,22 @@ class MainActivity : Activity() {
     private lateinit var loading: View
     private lateinit var loadingStatus: TextView
 
-    // —— 三个页面（同一时刻只显示一个）——
+    // —— 四个页面（同一时刻只显示一个）——
     private lateinit var chatPage: View
     private lateinit var settingsPageView: View
     private lateinit var extensionsPageView: View
+    private lateinit var aboutPageView: View
     private lateinit var settingsPage: SettingsPage
     private lateinit var extensionPage: ExtensionPage
+    private lateinit var aboutPage: AboutPage
     private var pageIndex = 0
 
-    // —— 底部玻璃岛导航 ——
+    /** 引擎未就绪时的启动画面是否盖着（底栏要等它退场后再一起出现） */
+    private var splashVisible = true
+
+    // —— 底栏（铺满的玻璃条 + 三格导航）——
     private lateinit var navArea: View
-    private lateinit var navIsland: View
+    private lateinit var navBar: View
     private lateinit var navPill: View
     private var navIndex = 0
 
@@ -78,13 +81,6 @@ class MainActivity : Activity() {
 
     /** WebView 是否停在非引擎端口的回环页（预览模式）—— 胶囊变成「← 主页」 */
     private var previewMode = false
-
-    /**
-     * 底栏占位区在对话页要涂的颜色 = 引擎网页自己的底色（§4.2 的"无缝"）。
-     * 引擎网页不是纯白（用户实测：底栏白条与网页对不齐、很突兀），所以运行时问它要；
-     * 拿不到就退回白色 —— 绝不能因为它影响功能。
-     */
-    private var chatStripColor = Color.WHITE
 
     /** 桌面模式：桌面 UA + 固定 1280px 视口 + 手势缩放（手机浏览器"电脑模式"等价物） */
     private var desktopMode = false
@@ -114,6 +110,7 @@ class MainActivity : Activity() {
         chatPage = findViewById(R.id.chatPage)
         settingsPageView = findViewById(R.id.settingsPage)
         extensionsPageView = findViewById(R.id.extensionsPage)
+        aboutPageView = findViewById(R.id.aboutPage)
         // 先赋值字段再配置：setupWebView 内部读取的是 this.webView，
         // 若写在 apply{} 里会在赋值完成前执行而触发 UninitializedPropertyAccessException。
         webView = findViewById<WebView>(R.id.webView)
@@ -126,8 +123,10 @@ class MainActivity : Activity() {
             onPageScaleChanged = { scale -> pageScale = scale; webView.reload() },
         )
         extensionPage = ExtensionPage(this)
+        aboutPage = AboutPage(this)
         settingsPage.bind()
         extensionPage.bind()
+        aboutPage.bind()
 
         setupNav()
         setupCapsule()
@@ -210,8 +209,6 @@ class MainActivity : Activity() {
                 ) {
                     setLoading(false)
                 }
-                // 底栏占位区要跟网页底色一致：直接问网页它自己的背景色（拿不到就保持原色）
-                samplePageColor()
                 // 桌面模式：视口改写为固定 1280px（响应式走桌面分支，侧栏完整展开）。
                 if (desktopMode) {
                     view.evaluateJavascript(DESKTOP_VIEWPORT_JS, null)
@@ -260,84 +257,79 @@ class MainActivity : Activity() {
         webView.loadUrl(url)
     }
 
-    // ---------------- 底栏三页 ----------------
+    // ---------------- 底栏四页 ----------------
 
     /**
-     * 切换页面：三页在同一个 Activity 里，切页只是换可见性 + 药丸平移（第 2 步的核心）。
-     * 底栏占位区的颜色跟着页面走：对话页 = 网页底色；扩展/设置页 = 透明（露出根节点渐变）。
+     * 切换页面：四页在同一个 Activity 里，切页只是换可见性 + 药丸平移（第 2 步的核心）。
+     * 底栏占位区始终透明 —— 玻璃条的半透明要把根节点的页面渐变透上来，才看得出玻璃材质。
      */
     private fun showPage(index: Int, animate: Boolean = true) {
-        if (index !in 0..2) return
+        if (index !in 0..3) return
         pageIndex = index
         chatPage.visibility = if (index == 0) View.VISIBLE else View.GONE
         extensionsPageView.visibility = if (index == 1) View.VISIBLE else View.GONE
         settingsPageView.visibility = if (index == 2) View.VISIBLE else View.GONE
+        aboutPageView.visibility = if (index == 3) View.VISIBLE else View.GONE
         selectNav(index, animate)
-        applyStripColor()
+        updateBarVisibility(animate)
         renderCapsule()
         when (index) {
             1 -> extensionPage.onShown()
             2 -> settingsPage.onShown()
+            3 -> aboutPage.onShown()
         }
     }
 
-    private fun applyStripColor() {
-        // 对话页：跟网页底色一致；其它页：透明，让根节点的页面渐变一路铺到底
-        navArea.setBackgroundColor(if (pageIndex == 0) chatStripColor else Color.TRANSPARENT)
-    }
-
-    /** 问网页"你自己的背景是什么色"，用来把底栏占位区染成同色（拿不到就保持原色） */
-    private fun samplePageColor() {
-        webView.evaluateJavascript(PAGE_BG_JS) { raw ->
-            Log.i(TAG, "engine page bottom background = $raw")
-            val color = parseCssColor(raw) ?: return@evaluateJavascript
-            if (color != chatStripColor) {
-                chatStripColor = color
-                applyStripColor()
-            }
+    /**
+     * 底栏显隐：启动画面还盖着对话页时不显示底栏 —— 等加载动画退场时再和页面一起淡入
+     * （用户报障：启动加载时就冒出底栏，时机不对）。
+     * 其它页面不会被启动画面盖住，所以那时底栏照常可用，不会把人困在设置页里。
+     */
+    private fun updateBarVisibility(animate: Boolean = true) {
+        if (pageIndex == 0 && splashVisible) {
+            navArea.animate().cancel()
+            navArea.alpha = 0f
+            navArea.visibility = View.INVISIBLE
+            return
         }
-    }
-
-    /** 解析 "rgb(r, g, b)"（evaluateJavascript 回传的是带引号的 JSON 串） */
-    private fun parseCssColor(raw: String?): Int? {
-        val s = raw?.trim()?.removeSurrounding("\"") ?: return null
-        if (!s.startsWith("rgb")) return null
-        val m = Regex("""(\d{1,3})\D+(\d{1,3})\D+(\d{1,3})""").find(s) ?: return null
-        val (r, g, b) = m.destructured
-        return Color.rgb(
-            r.toInt().coerceIn(0, 255),
-            g.toInt().coerceIn(0, 255),
-            b.toInt().coerceIn(0, 255),
-        )
+        if (navArea.visibility == View.VISIBLE && navArea.alpha >= 1f) return
+        navArea.visibility = View.VISIBLE
+        if (animate && !Motion.reduced(this)) {
+            navArea.alpha = 0f
+            navArea.animate().alpha(1f).setDuration(BAR_FADE_MS).start()
+        } else {
+            navArea.alpha = 1f
+        }
     }
 
     private fun setupNav() {
         navArea = findViewById(R.id.navArea)
-        navIsland = findViewById(R.id.navIsland)
+        navBar = findViewById(R.id.navBar)
         navPill = findViewById(R.id.navPill)
 
         // 阴影：直接给圆角 outline（layer-list 背景不一定自带 outline，不保险）
-        navIsland.outlineProvider = object : ViewOutlineProvider() {
+        navBar.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
-                val r = ISLAND_RADIUS_DP * resources.displayMetrics.density
+                val r = BAR_RADIUS_DP * resources.displayMetrics.density
                 outline.setRoundRect(0, 0, view.width, view.height, r)
             }
         }
-        // 药丸宽度按岛内容宽 / 3 算（别写死 dp），屏宽变化/旋转后要重算
-        navIsland.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutPill() }
+        // 药丸宽度按玻璃条内容宽 / 格子数 算（别写死 dp），屏宽变化/旋转后要重算
+        navBar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutPill() }
 
         findViewById<View>(R.id.navChat).setOnClickListener { showPage(0) }
         findViewById<View>(R.id.navExt).setOnClickListener { showPage(1) }
         findViewById<View>(R.id.navSettings).setOnClickListener { showPage(2) }
+        findViewById<View>(R.id.navAbout).setOnClickListener { showPage(3) }
         selectNav(0, animate = false)
-        applyStripColor()
+        updateBarVisibility(animate = false)
     }
 
-    /** 药丸宽度 = 岛内容宽 / 3（§3.2），并按当前选中格摆好位置 */
+    /** 药丸宽度 = 玻璃条内容宽 / 格子数，并按当前选中格摆好位置 */
     private fun layoutPill() {
-        val content = navIsland.width - navIsland.paddingLeft - navIsland.paddingRight
+        val content = navBar.width - navBar.paddingLeft - navBar.paddingRight
         if (content <= 0) return
-        val w = content / 3
+        val w = content / navCells.size
         // 只有宽度真的变了才改布局参数：本方法由 layout 回调触发，
         // 无条件 requestLayout 会让"布局→回调→再布局"转不停
         if (navPill.layoutParams.width != w) {
@@ -354,8 +346,8 @@ class MainActivity : Activity() {
             findViewById<TextView>(textId).setTextColor(color)
             findViewById<ImageView>(iconId).setColorFilter(color, PorterDuff.Mode.SRC_IN)
         }
-        val content = navIsland.width - navIsland.paddingLeft - navIsland.paddingRight
-        val to = ((content / 3) * index).toFloat()
+        val content = navBar.width - navBar.paddingLeft - navBar.paddingRight
+        val to = ((content / navCells.size) * index).toFloat()
         navPill.animate().cancel()
         if (!animate || Motion.reduced(this) || content <= 0) {
             navPill.translationX = to
@@ -463,6 +455,9 @@ class MainActivity : Activity() {
      * 重新盖回去由 render() 负责。
      */
     private fun setLoading(show: Boolean) {
+        splashVisible = show
+        // 底栏跟着启动画面走：盖着时隐藏，退场时和页面一起淡入
+        updateBarVisibility()
         if (show) {
             if (loading.visibility != View.VISIBLE) {
                 loading.animate().cancel()
@@ -573,8 +568,6 @@ class MainActivity : Activity() {
             }
         }
 
-        private const val TAG = "DshMobile"
-
         /** 页面缩放/横竖屏持久化：SharedPreferences 名 + key（设置页与引导共用） */
         private const val PREFS_UI = "dsh_ui"
         private const val KEY_PAGE_SCALE = "page_scale"
@@ -589,15 +582,19 @@ class MainActivity : Activity() {
         /** 加载页淡出时长（引擎就绪 + 网页首帧渲染完成之后） */
         private const val LOADING_FADE_MS = 320L
 
-        /** 底栏：药丸平移 460ms（只动 translationX）；岛圆角 24dp（改这里要同步 bg_glass_island） */
+        /** 底栏：药丸平移 460ms（只动 translationX）；玻璃条圆角 24dp（改这里要同步 bg_glass_bar） */
         private const val PILL_MS = 460L
-        private const val ISLAND_RADIUS_DP = 24f
+        private const val BAR_RADIUS_DP = 24f
+
+        /** 启动画面退场后底栏淡入的时长（和页面一起出现，别在加载时就冒出来） */
+        private const val BAR_FADE_MS = 260L
 
         /** 底栏三个格子：内容 id → 图标 id → 文字 id（顺序即药丸的格子顺序） */
         private val navCells = listOf(
             Triple(R.id.navChat, R.id.navChatIcon, R.id.navChatText),
             Triple(R.id.navExt, R.id.navExtIcon, R.id.navExtText),
             Triple(R.id.navSettings, R.id.navSettingsIcon, R.id.navSettingsText),
+            Triple(R.id.navAbout, R.id.navAboutIcon, R.id.navAboutText),
         )
 
         /** 导航未选中 / 选中态颜色（未选中值是 @color/nav_off，两处要一致） */
@@ -608,28 +605,6 @@ class MainActivity : Activity() {
 
         /** 网页底色：纯白，与底栏留白区一致，避免加载前闪一下（§4.4） */
         private val WEBVIEW_BG = 0xFFFFFFFF.toInt()
-
-        /**
-         * 取网页"最底部实际显示出来的那个元素"的背景色，交给原生把底栏占位区染成同色。
-         *
-         * 为什么不是取 body：实测引擎网页的 body 是白的，真正显色的里层容器是浅蓝灰
-         * （用户报障：底栏一条纯白横带很突兀）。所以在页面最下沿取三个点，各自往上找
-         * 第一个不透明的祖先，取多数票；全取不到就返回空串，Kotlin 那边保持原色 ——
-         * 绝不因为读不到而影响功能。
-         */
-        private const val PAGE_BG_JS =
-            "(function(){" +
-                "function bgOf(el){while(el){var c=getComputedStyle(el).backgroundColor;" +
-                "if(c&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return c;el=el.parentElement;}return '';}" +
-                "var w=window.innerWidth,h=window.innerHeight;" +
-                "var pts=[[2,h-2],[w-2,h-2],[Math.floor(w/2),h-2]];" +
-                "var votes={},best='',bestN=0;" +
-                "for(var i=0;i<pts.length;i++){" +
-                "var e=document.elementFromPoint(pts[i][0],pts[i][1]);" +
-                "var c=e?bgOf(e):'';if(!c)continue;" +
-                "votes[c]=(votes[c]||0)+1;" +
-                "if(votes[c]>bestN){bestN=votes[c];best=c;}}" +
-                "return best;})()"
 
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +

@@ -19,6 +19,7 @@
     <string name="nav_chat">对话</string>
     <string name="nav_ext">扩展</string>
     <string name="nav_settings">设置</string>
+    <string name="nav_about">关于</string>
 
     <!-- 引擎状态的短文案：对话页顶部小胶囊（§4.5）与设置页引擎卡片共用 -->
     <string name="engine_state_idle">引擎未运行</string>

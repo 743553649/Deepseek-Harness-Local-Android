@@ -1,19 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底部悬浮玻璃岛（174×45dp，docs/UI-REDESIGN.md §3.1）。
-     真·模糊在 Android 上做不到（§4.3），观感靠 半透明 + 渐变 + 1dp 高光描边 + 柔影。 -->
+<!-- 底栏玻璃条（铺满底栏，不再是中间那枚小岛）。
+     透明比比第一版明显更高：这样底下的页面渐变能透上来，才看得出是液态玻璃材质
+     （真·模糊在 Android 上做不到，见 docs/UI-REDESIGN.md §4.3 —— 观感靠
+      半透明 + 渐变 + 1dp 高光描边 + 柔影）。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 外圈 1dp 白描边：玻璃的边 -->
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#C7FFFFFF" />
+            <solid android:color="#5CFFFFFF" />
             <stroke
                 android:width="1dp"
-                android:color="#C7FFFFFF" />
+                android:color="#9EFFFFFF" />
             <corners android:radius="24dp" />
         </shape>
     </item>
 
-    <!-- 内层：72%→54% 白竖渐变（angle=270 才是从上到下） -->
+    <!-- 内层：44%→24% 白竖渐变（angle=270 才是从上到下） -->
     <item
         android:bottom="1dp"
         android:left="1dp"
@@ -22,8 +24,8 @@
         <shape android:shape="rectangle">
             <gradient
                 android:angle="270"
-                android:endColor="#8AFFFFFF"
-                android:startColor="#B8FFFFFF"
+                android:endColor="#3DFFFFFF"
+                android:startColor="#70FFFFFF"
                 android:type="linear" />
             <corners android:radius="23dp" />
         </shape>
@@ -33,11 +35,11 @@
     <item
         android:gravity="top"
         android:height="1dp"
-        android:left="14dp"
-        android:right="14dp"
+        android:left="20dp"
+        android:right="20dp"
         android:top="2dp">
         <shape android:shape="rectangle">
-            <solid android:color="#F2FFFFFF" />
+            <solid android:color="#B3FFFFFF" />
             <corners android:radius="1dp" />
         </shape>
     </item>

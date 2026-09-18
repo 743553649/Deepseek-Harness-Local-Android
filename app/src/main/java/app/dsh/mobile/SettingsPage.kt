@@ -3,8 +3,6 @@ package app.dsh.mobile
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.provider.Settings
@@ -26,7 +24,7 @@ import app.dsh.mobile.service.EngineService
  * 所以：① 没有返回箭头，靠底栏切走；② 引擎状态可以直接吃 MainActivity 的状态流，实时刷新
  * （之前拿不到 collector，只能每次进页面取一次快照）。
  *
- * 四个区块：引擎卡片（主角）→ 显示 → 权限中心 → 关于。
+ * 三个区块：引擎卡片（主角）→ 显示 → 权限中心。（「关于」已单独占底栏一格）
  */
 class SettingsPage(
     private val host: Activity,
@@ -98,15 +96,6 @@ class SettingsPage(
         host.findViewById<LinearLayout>(R.id.rowPriv).setOnClickListener { showPrivDialog() }
         host.findViewById<LinearLayout>(R.id.rowAccess).setOnClickListener { handleAccessibility() }
 
-        // —— 关于：版本 + 开源地址（点击复制，与原「关于」页行为一致） ——
-        host.findViewById<TextView>(R.id.valAboutVersion).text = versionName()
-        host.findViewById<LinearLayout>(R.id.rowRepo).setOnClickListener {
-            val cm = host.getSystemService(Activity.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(
-                ClipData.newPlainText("dsh-android", host.getString(R.string.about_repo))
-            )
-            Toast.makeText(host, "已复制仓库地址", Toast.LENGTH_SHORT).show()
-        }
         bound = true
     }
 
