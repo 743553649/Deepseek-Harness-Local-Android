@@ -181,6 +181,11 @@ cd /data/user/0/app.dsh.mobile/files/dsh-home/work/dsh-mobile-ui && node serve.j
 `themes.xml` 里 `statusBarColor` / `navigationBarColor` / `windowBackground` 现在是 `#FFF2F4F7`，新底色是 `#F5F7FB` → **必须一起改**，否则顶部系统栏和页面之间会有一条色差。
 `forceDarkAllowed=false`、`windowLightStatusBar=true` 保持不变。
 
+> **v1.2.42 起主界面改成全屏**：窗口覆盖到状态栏底下，`statusBarColor` 在代码里改成**透明**，
+> 内容整体下移一个状态栏高度（`MainActivity.setupEdgeToEdge` / `applyStatusBarInset`）——
+> 状态栏那一块显示的是**页面自己的底色**。引导页不开全屏，仍用 `themes.xml` 里的底色。
+> 注意：引擎网页能看到的区域高度**没变**（窗口多了一截，内容又下移同样多）。
+
 ---
 
 ## 4. 把引擎网页搬进 App 的注意事项（重点）
@@ -222,7 +227,12 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 `webView.setBackgroundColor(Color.WHITE)`。默认背景在页面首帧前可能是透明白或系统色，会在留白区闪一下，破坏"无缝"。
 
-### 4.5 引擎状态文本搬家后，要留一个"出问题时看得见"的出口
+### 4.5 ~~引擎状态文本搬家后，要留一个"出问题时看得见"的出口~~（状态那一半已回退，v1.2.43）
+
+> **后续变化**：胶囊的「说明原因」这一半**已删除**，只保留「← 主页」（§4.6）。
+> 原因：引擎只要不就绪，加载页就会盖住对话页、并把原因写在加载页上，
+> 再浮一枚胶囊纯属重复表达（用户报障「启动页顶部多了个浮岛显示引擎启动中」）。
+> 下面是当初的设计理由，保留备查。
 
 现在引擎状态文字在顶部导航栏里（`statusBar`，由 `EngineSupervisor.state` 驱动）。搬进设置页之后：
 
@@ -333,6 +343,9 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 - [x] 设置页：引擎状态 / 地址 / 版本正确，重启引擎能用（且不再卡死，见 PITFALLS J1）
 - [x] 扩展中心：三种状态颜色对，下载 / 激活 / 停用按钮都能用（激活/停用不再卡界面）
 - [x] 切页过渡：不闪（用户已确认）
+- [x] 启动页观感：自绘转圈 + 胶囊进度条（用户已确认"没问题"）
+- [x] 全屏：状态栏那一块显示页面底色、内容不被状态栏压住（用户已确认"没问题"）
+- [x] 启动页顶部不再有重复的状态胶囊（胶囊只在预览模式出现）
 - [ ] 横屏 + 桌面布局下底栏不歪、不顶到内容 —— **待验**（这轮没测横屏）
 - [ ] 系统开了「减少动态效果」时没有动画 —— 代码里已按 `ANIMATOR_DURATION_SCALE == 0` 短路，**未真机验**
 - [x] 深色模式仍是关闭状态（`forceDarkAllowed=false` 未动）
@@ -398,13 +411,16 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 | 7 | 第 1 步先独立 Activity、底栏常驻留给第 2 步 | **两步一起做**（v1.2.36） | 用户：独立页面之间是"硬切"，要求直接做常驻 |
 | 8 | —（没提过渡） | 切页**交叉淡入淡出 + 屏宽 6% 横向位移**（260ms） | 用户要求加动画（已确认不闪） |
 | 9 | —（v1.2.38 试过"运行时取网页底色"） | **已废弃**，改成按页面固定垫色 | 取网页底色对"白 vs 蓝"的观感没帮助，代码还多一层耦合 |
+| 10 | 启动页用系统 ProgressBar（转圈 + 细线进度条） | **两个都自绘**：`GlassSpinner`（轨道 + 250° 主色渐变圆弧匀速转）、`GlassProgress`（胶囊轨道 + 渐变，不确定态来回扫）；两者**二选一**，不再同时出现 | 用户：系统那套"很简陋廉价" |
+| 11 | 窗口不延伸到系统栏（§4.8 明确要求不开 edge-to-edge） | **主界面开全屏**：覆盖状态栏、状态栏透明、内容下移一个状态栏高度 | 用户要求"App 全屏覆盖，状态栏也要覆盖到" |
+| 12 | 顶部胶囊兼任「引擎未就绪时说明原因」（§4.5） | **只保留「← 主页」**，状态那一半删除 | 用户：启动页顶部多了一枚重复的「引擎启动中」胶囊 |
 
 ### 9.3 文件增删（相对 §6）
 
 **新增**
 
 - 页面：`res/layout/view_settings.xml` / `view_extensions.xml` / `view_about.xml`（由 `activity_main.xml` include）
-- 逻辑：`SettingsPage.kt` / `ExtensionPage.kt` / `AboutPage.kt` / `GlassSwitch.kt`（自绘玻璃开关）/ `Motion.kt`（「减少动态效果」判定的唯一入口）
+- 逻辑：`SettingsPage.kt` / `ExtensionPage.kt` / `AboutPage.kt` / `GlassSwitch.kt`（自绘玻璃开关）/ `Motion.kt`（「减少动态效果」判定的唯一入口）/ `GlassSpinner.kt` + `GlassProgress.kt`（启动页自绘转圈与进度条）
 - drawable：`bg_glass_bar.xml`（底栏玻璃）、`bg_glass_card.xml`、`bg_glass_hero.xml`（引擎卡片）、`bg_glass_pill.xml`（顶部胶囊）、`bg_nav_pill.xml`（选中态胶囊）、`bg_page.xml`（页面渐变 + 三团光晕）、`ic_nav_chat/ext/settings/about.xml`
 - `res/values/colors.xml`（§2 的设计令牌收口）
 
@@ -420,6 +436,8 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 2. **界面里重启引擎只能用 `supervisor.restartAsync()`**：`restart()` 是同步的，会在主线程等引擎退出 5~10 秒（`docs/PITFALLS.md` J1）。
 3. **玻璃开关别用 `Switch` / `SwitchCompat`**：仓库没有 Material 依赖，样式改不动 —— 用 `GlassSwitch`（§3.4）。
 4. **所有动画先过 `Motion.reduced(this)`**：系统开了「减少动态效果」就全部短路成终态（§2）。
+5. **全屏后的状态栏内边距由代码统一加**（`MainActivity.applyStatusBarInset`）：
+   别在 XML 里给页面写死 top padding，也别给 `pageHost` 加 —— 加载页要盖到状态栏底下（全屏启动图）。
 
 ---
 
