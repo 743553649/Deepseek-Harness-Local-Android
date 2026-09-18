@@ -257,8 +257,8 @@
         </FrameLayout>
     </LinearLayout>
 
-    <!-- 顶部小胶囊：只出现在对话页（§4.5 / §4.6）。
-         它在根节点上，画在整个内容层（含加载页）之上。 -->
+    <!-- 顶部小胶囊：只在「对话页 + 预览模式」出现（「← 主页」，§4.6）。
+         引擎未就绪时不显示 —— 那时加载页已经盖住对话页并写明了原因。 -->
     <LinearLayout
         android:id="@+id/capsule"
         android:layout_width="wrap_content"

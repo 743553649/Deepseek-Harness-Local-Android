@@ -37,9 +37,12 @@ import kotlinx.coroutines.launch
  * UI 策略：不重写官方 WebUI（上游 developer preview 迭代快，追协议是无底洞），
  * 只做原生外壳 —— 引擎 Healthy 后加载 127.0.0.1 回环页面。
  *
- * 第 2 步（本版）：设置页与扩展中心不再是独立 Activity，而是本 Activity 里的两个页面
- * （[SettingsPage] / [ExtensionPage]）。切页只动可见性 + 药丸平移，所以是平滑过渡、底栏常驻；
- * 返回键在非对话页 = 回对话页。
+ * 第 2 步（本版）：设置/扩展/关于不再是独立 Activity，而是本 Activity 里的三个页面
+ * （[SettingsPage] / [ExtensionPage] / [AboutPage]）。切页只动可见性 + 药丸平移，所以是平滑过渡、
+ * 底栏常驻；返回键在非对话页 = 回对话页。
+ *
+ * 全屏（v1.2.42）：窗口覆盖到状态栏底下（状态栏透明、内容整体下移一个状态栏高度），
+ * 所以状态栏那一块显示的是页面自己的底色。
  *
  * 详见 docs/UI-REDESIGN.md。
  */
@@ -83,9 +86,6 @@ class MainActivity : Activity() {
     // —— 对话页顶部小胶囊（引擎状态 / 预览返回）——
     private lateinit var capsule: View
     private lateinit var capsuleText: TextView
-
-    /** 引擎最新状态（顶部胶囊与设置页的引擎卡片共用） */
-    private var engineState: EngineSupervisor.State = EngineSupervisor.State.Idle
 
     /** WebView 是否停在非引擎端口的回环页（预览模式）—— 胶囊变成「← 主页」 */
     private var previewMode = false
@@ -511,38 +511,22 @@ class MainActivity : Activity() {
     }
 
     /**
-     * 胶囊的三态（§4.5 / §4.6）：预览模式 → 「← 主页」；引擎未就绪 → 说明原因；否则不显示。
-     * 它是唯一允许出现在对话页上的 App 元素，所以只在对话页显示。
+     * 顶部胶囊：**只在对话页的预览模式下出现**（「← 主页」）。
+     *
+     * 它曾经还兼任「引擎未就绪时说明原因」（§4.5），但实践证明这一半是多余的：
+     * 引擎只要不就绪，加载页就会盖住对话页，原因已经写在加载页上了；
+     * 再浮一枚胶囊反而重复（用户报障：启动页顶部多了一枚「引擎启动中」胶囊）。
+     * 所以状态那一半已删除 —— 要改回来看 §4.5 与 PITFALLS J2 的教训。
      */
     private fun renderCapsule() {
-        if (pageIndex != 0) {
-            capsule.visibility = View.GONE
-            return
-        }
-        if (previewMode) {
+        if (pageIndex == 0 && previewMode) {
             capsuleText.text = getString(R.string.btn_back)
             capsule.isClickable = true
             capsule.visibility = View.VISIBLE
             return
         }
-        val state = engineState
-        val ready = state is EngineSupervisor.State.Healthy ||
-            state is EngineSupervisor.State.SafeMode
-        if (ready) {
-            capsule.isClickable = false
-            capsule.visibility = View.GONE
-            return
-        }
-        capsuleText.text = when (state) {
-            is EngineSupervisor.State.Backoff ->
-                getString(R.string.engine_state_backoff, state.delayMs / 1000)
-            is EngineSupervisor.State.Failed -> getString(R.string.engine_state_failed, state.reason)
-            is EngineSupervisor.State.Installing,
-            is EngineSupervisor.State.Starting -> getString(R.string.engine_state_starting)
-            else -> getString(R.string.engine_state_idle)
-        }
         capsule.isClickable = false
-        capsule.visibility = View.VISIBLE
+        capsule.visibility = View.GONE
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -595,7 +579,6 @@ class MainActivity : Activity() {
     }
 
     private fun render(state: EngineSupervisor.State) {
-        engineState = state
         // 引擎侧还没就绪 → 把加载页盖回来（只盖对话页，底栏与设置/扩展页照常可用）
         if (state !is EngineSupervisor.State.Healthy && state !is EngineSupervisor.State.SafeMode) {
             urlLoaded = false
