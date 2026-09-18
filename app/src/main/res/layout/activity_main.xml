@@ -128,27 +128,22 @@
 
         </FrameLayout>
 
-        <!-- 底栏占位区：72dp（含底部 14dp 间距）。
-             默认透明 → 扩展/设置页时露出根节点的页面渐变；对话页时由代码染成网页底色。 -->
+        <!-- 底栏：铺满、直角、不留边距（不是悬浮岛了）。
+             这一层是"垫色"：对话页由代码设成纯白（跟白色的网页连成一片），
+             其它页透明 → 露出根节点的页面渐变；玻璃本体是里面的 navBar。 -->
         <FrameLayout
             android:id="@+id/navArea"
             android:layout_width="match_parent"
-            android:layout_height="72dp"
-            android:clipChildren="false">
+            android:layout_height="64dp"
+            android:background="#FFFFFFFF">
 
-            <!-- 玻璃条：铺满底栏（左右各留 12dp，仍是圆角悬浮块），45dp 高，圆角 24dp -->
+            <!-- 玻璃本体：透明 + 顶沿高光，铺满整条底栏 -->
             <FrameLayout
                 android:id="@+id/navBar"
                 android:layout_width="match_parent"
-                android:layout_height="45dp"
-                android:layout_gravity="top|center_horizontal"
-                android:layout_marginStart="12dp"
-                android:layout_marginTop="13dp"
-                android:layout_marginEnd="12dp"
+                android:layout_height="match_parent"
                 android:background="@drawable/bg_glass_bar"
-                android:clipChildren="false"
-                android:elevation="12dp"
-                android:padding="3dp">
+                android:padding="4dp">
 
                 <!-- 选中态药丸：宽度在代码里按玻璃条内容宽 / 格子数 算，别写死 dp -->
                 <View

@@ -1,46 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底栏玻璃条（铺满底栏，不再是中间那枚小岛）。
-     透明比比第一版明显更高：这样底下的页面渐变能透上来，才看得出是液态玻璃材质
-     （真·模糊在 Android 上做不到，见 docs/UI-REDESIGN.md §4.3 —— 观感靠
-      半透明 + 渐变 + 1dp 高光描边 + 柔影）。 -->
+<!-- 底栏玻璃：铺满、不留边距、直角（不是悬浮岛了）。
+     透明比比第一版高：底下垫的东西能透上来，才看得出是液态玻璃材质。
+     底下的"垫层"由 MainActivity 按页面切换（对话页=纯白，其它页=页面渐变）。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 外圈 1dp 白描边：玻璃的边 -->
+    <!-- 玻璃本体：44%→24% 白竖渐变（angle=270 才是从上到下） -->
     <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#5CFFFFFF" />
-            <stroke
-                android:width="1dp"
-                android:color="#9EFFFFFF" />
-            <corners android:radius="24dp" />
-        </shape>
-    </item>
-
-    <!-- 内层：44%→24% 白竖渐变（angle=270 才是从上到下） -->
-    <item
-        android:bottom="1dp"
-        android:left="1dp"
-        android:right="1dp"
-        android:top="1dp">
         <shape android:shape="rectangle">
             <gradient
                 android:angle="270"
                 android:endColor="#3DFFFFFF"
                 android:startColor="#70FFFFFF"
                 android:type="linear" />
-            <corners android:radius="23dp" />
         </shape>
     </item>
 
-    <!-- 顶部 1dp 高光线 -->
+    <!-- 顶沿 1dp 高光：玻璃的边（在纯白底上几乎看不见，正好） -->
     <item
         android:gravity="top"
-        android:height="1dp"
-        android:left="20dp"
-        android:right="20dp"
-        android:top="2dp">
+        android:height="1dp">
         <shape android:shape="rectangle">
             <solid android:color="#B3FFFFFF" />
-            <corners android:radius="1dp" />
         </shape>
     </item>
 </layer-list>

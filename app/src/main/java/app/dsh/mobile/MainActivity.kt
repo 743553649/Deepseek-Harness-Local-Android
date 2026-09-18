@@ -8,13 +8,12 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Outline
+import android.graphics.Color
 import android.graphics.PorterDuff
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.view.animation.PathInterpolator
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -62,6 +61,9 @@ class MainActivity : Activity() {
     private lateinit var extensionPage: ExtensionPage
     private lateinit var aboutPage: AboutPage
     private var pageIndex = 0
+
+    /** 首次进入时不做过渡（onCreate 里那一发） */
+    private var pagesReady = false
 
     /** 引擎未就绪时的启动画面是否盖着（底栏要等它退场后再一起出现） */
     private var splashVisible = true
@@ -265,14 +267,85 @@ class MainActivity : Activity() {
      */
     private fun showPage(index: Int, animate: Boolean = true) {
         if (index !in 0..3) return
+        val from = pageIndex
+        // 点当前这一格：什么都不用动（第一次进来除外）
+        if (pagesReady && from == index) {
+            onPageShown(index)
+            return
+        }
+        pagesReady = true
         pageIndex = index
-        chatPage.visibility = if (index == 0) View.VISIBLE else View.GONE
-        extensionsPageView.visibility = if (index == 1) View.VISIBLE else View.GONE
-        settingsPageView.visibility = if (index == 2) View.VISIBLE else View.GONE
-        aboutPageView.visibility = if (index == 3) View.VISIBLE else View.GONE
+        val target = pageAt(index)
+        val previous = pageAt(from)
+
+        // 先把"既不是旧页也不是新页"的那些页面收干净，连点也不会打架
+        for (i in 0..3) {
+            val v = pageAt(i)
+            if (v !== target && v !== previous) {
+                v.animate().cancel()
+                v.alpha = 1f
+                v.translationX = 0f
+                v.visibility = View.GONE
+            }
+        }
+
+        if (animate && !Motion.reduced(this)) {
+            // 交叉淡入淡出 + 轻微横向位移：新页从手势方向滑进来一点
+            val dir = if (index > from) 1f else -1f
+            val shift = PAGE_SHIFT_RATIO * resources.displayMetrics.widthPixels
+            target.animate().cancel()
+            previous.animate().cancel()
+            target.visibility = View.VISIBLE
+            target.alpha = 0f
+            target.translationX = dir * shift
+            target.animate()
+                .alpha(1f)
+                .translationX(0f)
+                .setDuration(PAGE_MS)
+                .setInterpolator(pageInterpolator)
+                .start()
+            previous.animate()
+                .alpha(0f)
+                .translationX(-dir * shift)
+                .setDuration(PAGE_MS)
+                .setInterpolator(pageInterpolator)
+                .withEndAction {
+                    previous.visibility = View.GONE
+                    previous.alpha = 1f
+                    previous.translationX = 0f
+                }
+                .start()
+        } else {
+            target.animate().cancel()
+            previous.animate().cancel()
+            previous.alpha = 1f
+            previous.translationX = 0f
+            previous.visibility = View.GONE
+            target.alpha = 1f
+            target.translationX = 0f
+            target.visibility = View.VISIBLE
+        }
+
         selectNav(index, animate)
+        applyBarBackdrop()
         updateBarVisibility(animate)
         renderCapsule()
+        onPageShown(index)
+    }
+
+    private fun pageAt(index: Int): View = when (index) {
+        0 -> chatPage
+        1 -> extensionsPageView
+        2 -> settingsPageView
+        else -> aboutPageView
+    }
+
+    /** 底栏垫色：对话页纯白（跟白色网页连成一片），其它页透明（露出页面渐变） */
+    private fun applyBarBackdrop() {
+        navArea.setBackgroundColor(if (pageIndex == 0) Color.WHITE else Color.TRANSPARENT)
+    }
+
+    private fun onPageShown(index: Int) {
         when (index) {
             1 -> extensionPage.onShown()
             2 -> settingsPage.onShown()
@@ -307,13 +380,6 @@ class MainActivity : Activity() {
         navBar = findViewById(R.id.navBar)
         navPill = findViewById(R.id.navPill)
 
-        // 阴影：直接给圆角 outline（layer-list 背景不一定自带 outline，不保险）
-        navBar.outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: Outline) {
-                val r = BAR_RADIUS_DP * resources.displayMetrics.density
-                outline.setRoundRect(0, 0, view.width, view.height, r)
-            }
-        }
         // 药丸宽度按玻璃条内容宽 / 格子数 算（别写死 dp），屏宽变化/旋转后要重算
         navBar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutPill() }
 
@@ -322,6 +388,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.navSettings).setOnClickListener { showPage(2) }
         findViewById<View>(R.id.navAbout).setOnClickListener { showPage(3) }
         selectNav(0, animate = false)
+        applyBarBackdrop()
         updateBarVisibility(animate = false)
     }
 
@@ -582,12 +649,17 @@ class MainActivity : Activity() {
         /** 加载页淡出时长（引擎就绪 + 网页首帧渲染完成之后） */
         private const val LOADING_FADE_MS = 320L
 
-        /** 底栏：药丸平移 460ms（只动 translationX）；玻璃条圆角 24dp（改这里要同步 bg_glass_bar） */
+        /** 底栏：药丸平移 460ms（只动 translationX） */
         private const val PILL_MS = 460L
-        private const val BAR_RADIUS_DP = 24f
 
         /** 启动画面退场后底栏淡入的时长（和页面一起出现，别在加载时就冒出来） */
         private const val BAR_FADE_MS = 260L
+
+        /** 切页过渡：260ms 交叉淡入淡出 + 屏宽 6% 的横向位移 */
+        private const val PAGE_MS = 260L
+        private const val PAGE_SHIFT_RATIO = 0.06f
+
+        private val pageInterpolator = PathInterpolator(0.2f, 0f, 0f, 1f)
 
         /** 底栏三个格子：内容 id → 图标 id → 文字 id（顺序即药丸的格子顺序） */
         private val navCells = listOf(
