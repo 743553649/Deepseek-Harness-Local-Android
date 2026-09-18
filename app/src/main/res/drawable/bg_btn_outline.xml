@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 次要按钮（下载 / 停用）：透明玻璃块 + 1dp 白描边 + 全圆角 34dp 高。 -->
+<!-- 次要按钮（下载 / 停用）：白玻璃底 + 1dp **淡墨细线** + 全圆角 34dp 高。
+     注意：预览稿里的次要按钮是「白底 + 白描边」，那是叠在页面渐变上的效果；
+     真机上它落在**玻璃面板**上，白叠白 = 完全看不见（用户实测）。
+     所以描边改用既有「细线」令牌同款的淡墨色。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#A8FFFFFF" />
+    <solid android:color="#B8FFFFFF" />
     <stroke
         android:width="1dp"
-        android:color="#D9FFFFFF" />
+        android:color="#1F0F1216" />
     <corners android:radius="999dp" />
 </shape>

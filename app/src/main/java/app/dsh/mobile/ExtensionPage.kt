@@ -2,14 +2,12 @@ package app.dsh.mobile
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.graphics.PorterDuff
 import android.graphics.Typeface
-import android.widget.ImageView
-import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -23,19 +21,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 扩展中心（v1.2.0）：自由下载环境扩展（Python / Git / JDK / FFmpeg…）。
+ * 扩展中心（底栏第三个目的地）。
  *
- * 三态红绿灯（沿用 strings.xml 里写明的既有约定）：
+ * 第 2 步（三页合一）之前这是一个独立 Activity；现在它是 MainActivity 里的一个页面。
+ * 附带好处：切到别的页面**不会**取消下载 —— 协程现在挂在 MainActivity 上，
+ * 只有真正退出 App 才会停（以前一离开页面，下载就被 Activity 销毁带走）。
+ *
+ * 三态（沿用 strings.xml 里写明的既有约定）：
  *  - 灰  未下载        → 按钮【下载】
  *  - 黄  已下载未激活  → 按钮【激活】（并入引擎 PATH，自动重启引擎）
  *  - 绿  已激活可用    → 按钮【停用】；长按整行可卸载
- *
- * 列表为程序化构建（清单约 18 项，无需引入 RecyclerView），按分类各包一块玻璃面板；
- * 下载在协程 IO 线程执行，进度经 runOnUiThread 回刷行内 ProgressBar。
  */
-class ExtensionStoreActivity : Activity() {
+class ExtensionPage(private val host: Activity) {
 
-    private val manager by lazy { ExtensionManager(this) }
+    private val manager by lazy { ExtensionManager(host) }
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** 正在下载的扩展 id（防重复点击） */
@@ -54,23 +53,20 @@ class ExtensionStoreActivity : Activity() {
         val progress: ProgressBar,
     )
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        setContentView(R.layout.activity_extension_store)
-
-        container = findViewById(R.id.listContainer)
-        tvSubtitle = findViewById(R.id.tvSubtitle)
-        findViewById<android.widget.ImageView>(R.id.btnBack).setOnClickListener { finish() }
-
+    /** 找控件 + 建列表（由 MainActivity.onCreate 调一次） */
+    fun bind() {
+        container = host.findViewById(R.id.listContainer)
+        tvSubtitle = host.findViewById(R.id.tvSubtitle)
         items = manager.loadCatalog()
         buildList()
         refreshHeader()
     }
 
-    override fun onDestroy() {
+    /** 每次切到本页时刷新计数（激活数可能被别处改过） */
+    fun onShown() = refreshHeader()
+
+    fun onDestroy() {
         uiScope.cancel()
-        super.onDestroy()
     }
 
     // ================= 列表构建 =================
@@ -94,22 +90,22 @@ class ExtensionStoreActivity : Activity() {
     }
 
     /** 分组标题（不是面板的一部分，所以放在面板外面） */
-    private fun sectionHeader(title: String): TextView = TextView(this).apply {
+    private fun sectionHeader(title: String): TextView = TextView(host).apply {
         text = title
-        setTextColor(getColor(R.color.section))
+        setTextColor(host.getColor(R.color.section))
         textSize = 11.5f
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(4), dp(22), dp(4), dp(9))
     }
 
-    private fun glassPanel(): LinearLayout = LinearLayout(this).apply {
+    private fun glassPanel(): LinearLayout = LinearLayout(host).apply {
         orientation = LinearLayout.VERTICAL
-        background = getDrawable(R.drawable.bg_glass_card)
+        background = host.getDrawable(R.drawable.bg_glass_card)
     }
 
-    /** 行分隔线：注意与面板左右内边距对齐，别贴到圆角上 */
-    private fun divider(): View = View(this).apply {
-        setBackgroundColor(getColor(R.color.hair))
+    /** 行分隔线：与面板左右内边距对齐，别贴到圆角上 */
+    private fun divider(): View = View(host).apply {
+        setBackgroundColor(host.getColor(R.color.hair))
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
         ).apply { marginStart = dp(16); marginEnd = dp(16) }
@@ -117,26 +113,25 @@ class ExtensionStoreActivity : Activity() {
 
     private fun buildRow(ext: ExtensionManager.Extension): View {
         val refs = RowRefs(
-            dot = View(this).apply {
+            dot = View(host).apply {
                 setBackgroundResource(R.drawable.bg_status_dot)
                 layoutParams = LinearLayout.LayoutParams(dp(7), dp(7))
             },
-            stateText = TextView(this).apply {
+            stateText = TextView(host).apply {
                 textSize = 11.5f
-                setTextColor(getColor(R.color.muted))
+                setTextColor(host.getColor(R.color.muted))
             },
-            action = TextView(this).apply {
+            action = TextView(host).apply {
                 textSize = 12f
                 gravity = Gravity.CENTER
                 minWidth = dp(64)
-                minHeight = dp(34)
                 setPadding(dp(16), 0, dp(16), 0)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)
                 ).apply { marginStart = dp(10) }
             },
-            progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                progressTintList = ColorStateList.valueOf(getColor(R.color.accent))
+            progress = ProgressBar(host, null, android.R.attr.progressBarStyleHorizontal).apply {
+                progressTintList = ColorStateList.valueOf(host.getColor(R.color.accent))
                 visibility = View.GONE
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(4)
@@ -144,46 +139,46 @@ class ExtensionStoreActivity : Activity() {
             },
         )
 
-        val row = LinearLayout(this).apply {
+        val row = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(13), dp(16), dp(13))
             // 行内主体：图标 + 文案 + 状态 + 按钮
-            val main = LinearLayout(this@ExtensionStoreActivity).apply {
+            val main = LinearLayout(host).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(ImageView(this@ExtensionStoreActivity).apply {
+                addView(ImageView(host).apply {
                     // 官方品牌图标：17 个 Simple Icons/Material 矢量 + ImageMagick 官方 logo PNG，
                     // 统一 SRC_IN 白色（彩色 chip 上剪影风格）；catalog iconRes 字段驱动
                     val resId = ext.iconRes.takeIf { it.isNotEmpty() }
-                        ?.let { resources.getIdentifier(it, "drawable", packageName) } ?: 0
+                        ?.let { host.resources.getIdentifier(it, "drawable", host.packageName) } ?: 0
                     if (resId != 0) {
                         setImageResource(resId)
                         setColorFilter(0xFFFFFFFF.toInt(), PorterDuff.Mode.SRC_IN)
                     }
                     setPadding(dp(6), dp(6), dp(6), dp(6))
-                    background = getDrawable(R.drawable.bg_icon_chip)
+                    background = host.getDrawable(R.drawable.bg_icon_chip)
                     backgroundTintList = ColorStateList.valueOf(categoryColor(ext.category))
                     layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
                 })
-                addView(LinearLayout(this@ExtensionStoreActivity).apply {
+                addView(LinearLayout(host).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                     ).apply { marginStart = dp(13); marginEnd = dp(8) }
-                    addView(TextView(this@ExtensionStoreActivity).apply {
+                    addView(TextView(host).apply {
                         text = ext.name
                         textSize = 14f
                         setTypeface(typeface, Typeface.BOLD)
-                        setTextColor(getColor(R.color.ink))
+                        setTextColor(host.getColor(R.color.ink))
                     })
-                    addView(TextView(this@ExtensionStoreActivity).apply {
+                    addView(TextView(host).apply {
                         text = subLine(ext)
                         textSize = 11.5f
-                        setTextColor(getColor(R.color.faint))
+                        setTextColor(host.getColor(R.color.faint))
                         setPadding(0, dp(3), 0, 0)
                     })
                     // 状态行：圆点 + 文案（与预览稿一致，点跟着文字走）
-                    addView(LinearLayout(this@ExtensionStoreActivity).apply {
+                    addView(LinearLayout(host).apply {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(0, dp(5), 0, 0)
@@ -224,12 +219,12 @@ class ExtensionStoreActivity : Activity() {
         val state = manager.state(ext.id)
 
         val (stateLabel, dotColor) = when {
-            downloadingNow -> "安装中…" to getColor(R.color.state_warn)
+            downloadingNow -> "安装中…" to host.getColor(R.color.state_warn)
             state == ExtensionManager.ExtState.ACTIVATED ->
-                getString(R.string.ext_state_activated) to getColor(R.color.state_ok)
+                host.getString(R.string.ext_state_activated) to host.getColor(R.color.state_ok)
             state == ExtensionManager.ExtState.DOWNLOADED ->
-                getString(R.string.ext_state_downloaded) to getColor(R.color.state_warn)
-            else -> getString(R.string.ext_state_none) to getColor(R.color.faint)
+                host.getString(R.string.ext_state_downloaded) to host.getColor(R.color.state_warn)
+            else -> host.getString(R.string.ext_state_none) to host.getColor(R.color.faint)
         }
         // 已装扩展在状态行追加实际版本（安装时从 Termux 仓库索引记录）
         val ver = if (!downloadingNow && state != ExtensionManager.ExtState.NOT_DOWNLOADED)
@@ -249,33 +244,30 @@ class ExtensionStoreActivity : Activity() {
                 refs.progress.visibility = View.GONE
                 refs.action.visibility = View.VISIBLE
                 when (state) {
-                    ExtensionManager.ExtState.NOT_DOWNLOADED -> {
-                        styleAction(refs.action, getString(R.string.ext_action_download), false)
-                    }
-                    ExtensionManager.ExtState.DOWNLOADED -> {
-                        styleAction(refs.action, getString(R.string.ext_action_activate), true)
-                    }
-                    ExtensionManager.ExtState.ACTIVATED -> {
-                        styleAction(refs.action, getString(R.string.ext_action_deactivate), false)
-                    }
+                    ExtensionManager.ExtState.NOT_DOWNLOADED ->
+                        styleAction(refs.action, host.getString(R.string.ext_action_download), false)
+                    ExtensionManager.ExtState.DOWNLOADED ->
+                        styleAction(refs.action, host.getString(R.string.ext_action_activate), true)
+                    ExtensionManager.ExtState.ACTIVATED ->
+                        styleAction(refs.action, host.getString(R.string.ext_action_deactivate), false)
                 }
             }
         }
     }
 
-    /** 主按钮=主色渐变 + 深字（浅蓝底上白字会糊）；次要按钮=白玻璃 + 描边 */
+    /** 主按钮=主色渐变 + 深字（浅蓝底上白字会糊）；次要按钮=白玻璃 + 淡墨细线 + 深灰字 */
     private fun styleAction(btn: TextView, label: String, primary: Boolean) {
         btn.text = label
         btn.visibility = View.VISIBLE
         btn.isClickable = true
         btn.setBackgroundResource(if (primary) R.drawable.bg_btn_accent else R.drawable.bg_btn_outline)
         btn.backgroundTintList = null
-        btn.setTextColor(getColor(if (primary) R.color.accent_on else R.color.muted))
+        btn.setTextColor(host.getColor(if (primary) R.color.accent_on else R.color.muted))
     }
 
     private fun refreshHeader() {
         val active = manager.activeCount()
-        tvSubtitle.text = getString(
+        tvSubtitle.text = host.getString(
             R.string.ext_subtitle, manager.deviceAbiKey(), active, items.size
         )
     }
@@ -294,14 +286,14 @@ class ExtensionStoreActivity : Activity() {
         if (ext.id in downloading) return
         downloading.add(ext.id)
         // 点击即时反馈：进入「安装中」态 + Toast，避免误以为没反应
-        Toast.makeText(this, getString(R.string.ext_download_start, ext.name), Toast.LENGTH_SHORT).show()
+        Toast.makeText(host, host.getString(R.string.ext_download_start, ext.name), Toast.LENGTH_SHORT).show()
         refreshRow(ext)
         uiScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     manager.download(ext,
                         onProgress = { p ->
-                            runOnUiThread {
+                            host.runOnUiThread {
                                 val refs = rowRefs[ext.id] ?: return@runOnUiThread
                                 // 防御性自愈：refreshRow 的时序竞态可能把进度条设成 GONE，
                                 // 任何进度回调到达都强制恢复可见（visibility 只在此处维护）
@@ -323,7 +315,7 @@ class ExtensionStoreActivity : Activity() {
                             }
                         },
                         onStage = { stage ->
-                            runOnUiThread {
+                            host.runOnUiThread {
                                 val refs = rowRefs[ext.id] ?: return@runOnUiThread
                                 refs.progress.visibility = View.VISIBLE
                                 refs.action.visibility = View.GONE
@@ -336,13 +328,12 @@ class ExtensionStoreActivity : Activity() {
             result
                 .onSuccess {
                     Toast.makeText(
-                        this@ExtensionStoreActivity,
-                        "${ext.name} 下载完成，可在下方激活", Toast.LENGTH_SHORT
+                        host, "${ext.name} 下载完成，可在下方激活", Toast.LENGTH_SHORT
                     ).show()
                 }
                 .onFailure { e ->
-                    AlertDialog.Builder(this@ExtensionStoreActivity)
-                        .setTitle(getString(R.string.ext_download_failed, ext.name))
+                    AlertDialog.Builder(host)
+                        .setTitle(host.getString(R.string.ext_download_failed, ext.name))
                         .setMessage(e.message ?: "未知错误")
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
@@ -355,7 +346,8 @@ class ExtensionStoreActivity : Activity() {
     private fun activate(ext: ExtensionManager.Extension) {
         runCatching { manager.activate(ext.id) }
             .onSuccess {
-                Toast.makeText(this, getString(R.string.ext_activate_toast), Toast.LENGTH_SHORT).show()
+                // 激活后才需要把 bin/lib 并进引擎环境 → 异步重启，别卡界面
+                Toast.makeText(host, host.getString(R.string.ext_activate_toast), Toast.LENGTH_SHORT).show()
                 restartEngine()
                 refreshRow(ext)
                 refreshHeader()
@@ -364,7 +356,7 @@ class ExtensionStoreActivity : Activity() {
 
     private fun deactivate(ext: ExtensionManager.Extension) {
         manager.deactivate(ext.id)
-        Toast.makeText(this, getString(R.string.ext_deactivate_toast), Toast.LENGTH_SHORT).show()
+        Toast.makeText(host, host.getString(R.string.ext_deactivate_toast), Toast.LENGTH_SHORT).show()
         restartEngine()
         refreshRow(ext)
         refreshHeader()
@@ -372,10 +364,10 @@ class ExtensionStoreActivity : Activity() {
 
     private fun confirmUninstall(ext: ExtensionManager.Extension) {
         if (manager.state(ext.id) == ExtensionManager.ExtState.NOT_DOWNLOADED) return
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.ext_uninstall_title))
-            .setMessage(getString(R.string.ext_uninstall_msg, ext.name))
-            .setPositiveButton(getString(R.string.ext_dialog_uninstall)) { _, _ ->
+        AlertDialog.Builder(host)
+            .setTitle(host.getString(R.string.ext_uninstall_title))
+            .setMessage(host.getString(R.string.ext_uninstall_msg, ext.name))
+            .setPositiveButton(host.getString(R.string.ext_dialog_uninstall)) { _, _ ->
                 val wasActive = manager.state(ext.id) == ExtensionManager.ExtState.ACTIVATED
                 manager.remove(ext.id)
                 if (wasActive) restartEngine()
@@ -386,9 +378,9 @@ class ExtensionStoreActivity : Activity() {
             .show()
     }
 
-    /** 引擎重启：已激活扩展的 bin/lib 需要随新进程环境生效 */
+    /** 引擎重启（异步）：已激活扩展的 bin/lib 需要随新进程环境生效 */
     private fun restartEngine() {
-        (application as DshApp).supervisor.restart()
+        (host.application as DshApp).supervisor.restartAsync()
     }
 
     // ================= 杂项 =================
@@ -399,5 +391,5 @@ class ExtensionStoreActivity : Activity() {
         else -> 0xFFA78BFA.toInt()
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dp(v: Int): Int = (v * host.resources.displayMetrics.density).toInt()
 }

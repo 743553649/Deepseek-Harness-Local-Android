@@ -54,7 +54,7 @@ object FluidCloud {
      */
     private const val AGENT_TTL_MS = 10 * 60 * 1000L
 
-    /** 设置页开关所在的偏好文件与 key（SettingsActivity 直接引用这两个常量，避免字面量重复） */
+    /** 设置页开关所在的偏好文件与 key（SettingsPage 直接引用这两个常量，避免字面量重复） */
     const val PREFS_UI = "dsh_ui"
     const val KEY_ISLAND_ENABLED = "island_enabled"
 

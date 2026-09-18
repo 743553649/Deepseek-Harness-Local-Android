@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  扩展中心（第 2 步：并进 MainActivity，作为底栏三页之一）。
+  顶部不再是「返回箭头 + 标题」的独立页头，改成滚动区里的标题 + 副标题（设备架构 · 激活计数），
+  和预览稿一致。列表行本身仍是代码拼的（见 ExtensionPage），这里只给容器。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="20dp"
+            android:text="@string/ext_title"
+            android:textColor="@color/ink"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- 副标题：设备架构 + 激活计数（机器数据走 monospace） -->
+        <TextView
+            android:id="@+id/tvSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="5dp"
+            android:fontFamily="monospace"
+            android:textColor="@color/muted"
+            android:textSize="11.5sp" />
+
+        <LinearLayout
+            android:id="@+id/listContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </LinearLayout>
+</ScrollView>

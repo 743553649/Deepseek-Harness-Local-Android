@@ -17,6 +17,8 @@
     <color name="faint">#FF9AA2B0</color>
     <!-- 分组标题（显示 / 权限中心 / 关于…） -->
     <color name="section">#FF8A93A3</color>
+    <!-- 底栏未选中态的图标/文字 -->
+    <color name="nav_off">#FF7A8292</color>
     <!-- 细线：rgba(15,18,22,.06)，行分隔 -->
     <color name="hair">#0F0F1216</color>
 

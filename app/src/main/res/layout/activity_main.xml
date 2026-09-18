@@ -1,42 +1,132 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  界面骨架（液态玻璃 + 底部悬浮玻璃岛导航）。
+  界面骨架（液态玻璃 + 常驻底部玻璃岛导航）。
+
+  第 2 步（三页合一）：设置页与扩展中心不再是独立 Activity，而是本布局里的两个页面，
+  和对话页（WebView）在同一个 Activity 里切换 —— 这样切页是真正的平滑过渡，底栏也常驻不动。
 
   分层：
-    root ├─ 竖向 LinearLayout
-    │       ├─ WebView（weight=1）
-    │       └─ navArea（72dp 纯白占位区，里面是悬浮玻璃岛）
-    ├─ capsule（顶部小胶囊：引擎未就绪时说明原因 / 预览模式时变「← 主页」）
-    └─ loading（引擎就绪前的加载页，覆盖层）
+    root
+    ├─ 竖向 LinearLayout
+    │   ├─ pageHost（weight=1，装三个页面，同一时刻只显示一个）
+    │   │   ├─ chatPage（白底 + WebView）
+    │   │   ├─ settingsPage / extensionsPage（include 进来的两个页面，透明底）
+    │   │   ├─ loading（引擎就绪前的加载页：只盖对话页，不盖底栏，也不盖设置/扩展）
+    │   └─ navArea（72dp 占位区，里面是悬浮玻璃岛）
+    └─ capsule（对话页顶部小胶囊：引擎未就绪时说明原因 / 预览模式时变「← 主页」）
 
   ⚠️ 底栏绝不能盖住网页的输入框（docs/UI-REDESIGN.md §4.2）：
-    - 用竖向 LinearLayout 让 WebView 自己变矮，**不要**用 FrameLayout 把岛叠在 WebView 上；
-    - **不要**给 WebView 设 paddingBottom（padding 不改变网页视口，网页不会让位）；
-    - 留白区底色必须是纯白，和网页白底连成一片，交界处不画任何线 —— 「无缝」的全部秘密。
+    WebView 用 weight=1 自己变矮，底栏是它下面的兄弟节点，不是叠在它上面。
+  ⚠️ navArea 默认透明，让根节点的页面渐变透过来（扩展/设置页要用）；
+    对话页时由代码把它设成引擎网页底部的颜色（§4.2 的"无缝"，见 MainActivity）。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FFFFFFFF">
+    android:background="@drawable/bg_page">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <WebView
-            android:id="@+id/webView"
+        <FrameLayout
+            android:id="@+id/pageHost"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1" />
+            android:layout_weight="1">
 
-        <!-- 底栏占位区：72dp（含底部 14dp 间距） -->
+            <!-- ============ 页面一：对话（纯 WebView，不放任何 App 自己的东西） ============ -->
+            <LinearLayout
+                android:id="@+id/chatPage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#FFFFFFFF"
+                android:orientation="vertical">
+
+                <WebView
+                    android:id="@+id/webView"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+            </LinearLayout>
+
+            <!-- 加载页：引擎侧没就绪时盖住**对话页**；网页首帧渲染完成后淡出。
+                 放在 chatPage 之后、两个 include 之前，且**不设 elevation** ——
+                 FrameLayout 里后画的在上，这样设置/扩展页不会被启动画面盖住。 -->
+            <LinearLayout
+                android:id="@+id/loading"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_page"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="96dp"
+                    android:layout_height="96dp"
+                    android:contentDescription="@string/app_name"
+                    android:src="@drawable/ic_launcher" />
+
+                <TextView
+                    android:id="@+id/loadingStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:gravity="center"
+                    android:paddingHorizontal="32dp"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <ProgressBar
+                    android:id="@+id/loadingSpinner"
+                    style="?android:attr/progressBarStyle"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_marginTop="18dp"
+                    android:indeterminateTint="@color/accent" />
+
+                <!-- 安装/解压进度：null 时转圈，有值时走确定性百分比 -->
+                <ProgressBar
+                    android:id="@+id/installProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="220dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:indeterminate="true"
+                    android:maxHeight="3dp"
+                    android:minHeight="3dp"
+                    android:progressBackgroundTint="#FFE7E9EF"
+                    android:progressTint="@color/accent"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- ============ 页面二 / 三：设置、扩展中心 ============ -->
+            <include
+                android:id="@+id/settingsPage"
+                layout="@layout/view_settings"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <include
+                android:id="@+id/extensionsPage"
+                layout="@layout/view_extensions"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <!-- 底栏占位区：72dp（含底部 14dp 间距）。
+             默认透明 → 扩展/设置页时露出根节点的页面渐变；对话页时由代码染成网页底色。 -->
         <FrameLayout
             android:id="@+id/navArea"
             android:layout_width="match_parent"
             android:layout_height="72dp"
-            android:background="#FFFFFFFF"
             android:clipChildren="false">
 
             <!-- 悬浮玻璃岛：174×45dp，圆角 24dp -->
@@ -85,7 +175,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="1dp"
                             android:text="@string/nav_chat"
-                            android:textColor="#FF7A8292"
+                            android:textColor="@color/nav_off"
                             android:textSize="9.5sp" />
                     </LinearLayout>
 
@@ -110,7 +200,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="1dp"
                             android:text="@string/nav_ext"
-                            android:textColor="#FF7A8292"
+                            android:textColor="@color/nav_off"
                             android:textSize="9.5sp" />
                     </LinearLayout>
 
@@ -135,7 +225,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="1dp"
                             android:text="@string/nav_settings"
-                            android:textColor="#FF7A8292"
+                            android:textColor="@color/nav_off"
                             android:textSize="9.5sp" />
                     </LinearLayout>
                 </LinearLayout>
@@ -143,8 +233,8 @@
         </FrameLayout>
     </LinearLayout>
 
-    <!-- 顶部小胶囊：唯一允许出现在对话页上的 App 元素（§4.5 / §4.6）。
-         elevation 要压过加载页（11dp），否则引擎没就绪时看不到它。 -->
+    <!-- 顶部小胶囊：只出现在对话页（§4.5 / §4.6）。
+         它在根节点上，画在整个内容层（含加载页）之上。 -->
     <LinearLayout
         android:id="@+id/capsule"
         android:layout_width="wrap_content"
@@ -166,58 +256,5 @@
             android:singleLine="true"
             android:textColor="@color/muted"
             android:textSize="12.5sp" />
-    </LinearLayout>
-
-    <!-- 加载页：引擎侧没就绪时盖住网页；网页首帧渲染完成后淡出 -->
-    <LinearLayout
-        android:id="@+id/loading"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@drawable/bg_page"
-        android:clickable="true"
-        android:elevation="11dp"
-        android:focusable="true"
-        android:gravity="center"
-        android:orientation="vertical">
-
-        <!-- 应用图标居中（用真正的启动图标；自适应图标 API 26+ 可直接放进 ImageView） -->
-        <ImageView
-            android:layout_width="96dp"
-            android:layout_height="96dp"
-            android:contentDescription="@string/app_name"
-            android:src="@drawable/ic_launcher" />
-
-        <!-- 图标正下方的启动信息（只说"在干什么"，不出现端口/域名） -->
-        <TextView
-            android:id="@+id/loadingStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:gravity="center"
-            android:paddingHorizontal="32dp"
-            android:textColor="@color/ink"
-            android:textSize="14sp" />
-
-        <ProgressBar
-            android:id="@+id/loadingSpinner"
-            style="?android:attr/progressBarStyle"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginTop="18dp"
-            android:indeterminateTint="@color/accent" />
-
-        <!-- 安装/解压进度：null 时转圈，有值时走确定性百分比 -->
-        <ProgressBar
-            android:id="@+id/installProgress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="220dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:indeterminate="true"
-            android:maxHeight="3dp"
-            android:minHeight="3dp"
-            android:progressBackgroundTint="#FFE7E9EF"
-            android:progressTint="@color/accent"
-            android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

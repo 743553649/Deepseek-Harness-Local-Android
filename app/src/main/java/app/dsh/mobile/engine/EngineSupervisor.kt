@@ -247,6 +247,22 @@ class EngineSupervisor(private val ctx: Context) {
     }
 
     /**
+     * 界面用的重启（v1.2.36）：**不在调用线程上等引擎退出**。
+     *
+     * 为什么需要它：[restart] 走的是同步 [stop]，而 [EngineProcess.stop] 要等引擎优雅退出
+     * （最长 10 秒，见 EngineProcess 的 deadline）。从界面（主线程）调它 = 整屏卡死 5~10 秒。
+     *
+     * 这里走的是退出路径同款的异步停法：状态立刻变更、收尾丢后台，并把这次收尾记进
+     * [pendingShutdown] —— 监督循环 spawn 之前会等它跑完（见 [awaitPendingShutdown]），
+     * 所以"新引擎起来又被旧强杀打掉 / 撞端口"（PITFALLS I1）不会复现。
+     */
+    fun restartAsync() {
+        val scope = scopeRef ?: return
+        stopAsync(scope)
+        start(scope)
+    }
+
+    /**
      * 监督循环是否在跑（≈ 常驻服务在跑）。
      * 设置页改流体云开关时用它判断要不要立刻刷新通知 —— 服务没跑就别发意图，否则会把引擎拉起来。
      */

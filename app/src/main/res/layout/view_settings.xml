@@ -1,0 +1,463 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设置页（第 2 步：并进 MainActivity，作为底栏三页之一）。
+  与第 1 步的区别：没有顶部返回栏（底栏常驻，靠底栏切回来），底色透明 ——
+  页面底色由 MainActivity 根节点的渐变统一提供，这样切页时不会出现两层渐变。
+  结构：引擎卡片（主角）→ 显示 → 权限中心 → 关于。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="24dp">
+
+        <!-- ============ 引擎卡片：这一页的主角 ============ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_glass_hero"
+            android:orientation="vertical"
+            android:paddingStart="18dp"
+            android:paddingTop="18dp"
+            android:paddingEnd="18dp"
+            android:paddingBottom="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- 状态点：全页唯一一处自发动画（就绪时呼吸），代码里驱动 -->
+                <View
+                    android:id="@+id/engineDot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/bg_status_dot"
+                    android:backgroundTint="@color/state_warn" />
+
+                <TextView
+                    android:id="@+id/engineState"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="9dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/ink"
+                    android:textSize="15.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/engineVersion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/faint"
+                    android:textSize="11.5sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/engineAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:singleLine="true"
+                android:textColor="@color/muted"
+                android:textSize="12.5sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="15dp"
+                android:background="@color/hair" />
+
+            <LinearLayout
+                android:id="@+id/rowRestart"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_restart_engine"
+                    android:textColor="@color/accent_ink"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/setting_restart_engine_sub"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ============ 显示 ============ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="9dp"
+            android:text="@string/settings_section_display"
+            android:textColor="@color/section"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_glass_card"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/rowLandscape"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_landscape"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <app.dsh.mobile.GlassSwitch
+                    android:id="@+id/swLandscape"
+                    android:layout_width="44dp"
+                    android:layout_height="26dp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="16dp"
+                android:background="@color/hair" />
+
+            <LinearLayout
+                android:id="@+id/rowIsland"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_island"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valIsland"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp"
+                    android:visibility="gone" />
+
+                <app.dsh.mobile.GlassSwitch
+                    android:id="@+id/swIsland"
+                    android:layout_width="44dp"
+                    android:layout_height="26dp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="16dp"
+                android:background="@color/hair" />
+
+            <LinearLayout
+                android:id="@+id/rowScale"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_scale"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valScale"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="90%"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginStart="6dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ============ 权限中心 ============ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="9dp"
+            android:text="@string/settings_section_priv"
+            android:textColor="@color/section"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_glass_card"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/rowPriv"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_priv_mode"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valPriv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/priv_normal"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginStart="6dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="16dp"
+                android:background="@color/hair" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_root_status"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valRootStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/setting_root_status_no"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="16dp"
+                android:background="@color/hair" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_shizuku_status"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valShizuku"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/setting_shizuku_absent"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="16dp"
+                android:background="@color/hair" />
+
+            <LinearLayout
+                android:id="@+id/rowAccess"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/setting_access"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valAccess"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginStart="6dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ============ 关于（原独立「关于」页已并进这里） ============ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="9dp"
+            android:text="@string/settings_section_about"
+            android:textColor="@color/section"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_glass_card"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/about_app_name"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/valAboutVersion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="16dp"
+                android:background="@color/hair" />
+
+            <!-- 开源地址：点击复制（与原「关于」页行为一致） -->
+            <LinearLayout
+                android:id="@+id/rowRepo"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/about_open_source"
+                    android:textColor="@color/ink"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:ellipsize="middle"
+                    android:fontFamily="monospace"
+                    android:gravity="end"
+                    android:singleLine="true"
+                    android:text="@string/about_repo"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp" />
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginStart="6dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>
