@@ -14,6 +14,7 @@ import android.graphics.PorterDuff
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.animation.PathInterpolator
@@ -288,6 +289,7 @@ class MainActivity : Activity() {
     /** 问网页"你自己的背景是什么色"，用来把底栏占位区染成同色（拿不到就保持原色） */
     private fun samplePageColor() {
         webView.evaluateJavascript(PAGE_BG_JS) { raw ->
+            Log.i(TAG, "engine page bottom background = $raw")
             val color = parseCssColor(raw) ?: return@evaluateJavascript
             if (color != chatStripColor) {
                 chatStripColor = color
@@ -571,6 +573,8 @@ class MainActivity : Activity() {
             }
         }
 
+        private const val TAG = "DshMobile"
+
         /** 页面缩放/横竖屏持久化：SharedPreferences 名 + key（设置页与引导共用） */
         private const val PREFS_UI = "dsh_ui"
         private const val KEY_PAGE_SCALE = "page_scale"
@@ -606,16 +610,26 @@ class MainActivity : Activity() {
         private val WEBVIEW_BG = 0xFFFFFFFF.toInt()
 
         /**
-         * 取网页自己的背景色（body → html → body 的第一个子元素），交给原生把底栏占位区染成同色。
-         * 全是透明就返回空串，Kotlin 那边保持原色 —— 绝不因为读不到而影响功能。
+         * 取网页"最底部实际显示出来的那个元素"的背景色，交给原生把底栏占位区染成同色。
+         *
+         * 为什么不是取 body：实测引擎网页的 body 是白的，真正显色的里层容器是浅蓝灰
+         * （用户报障：底栏一条纯白横带很突兀）。所以在页面最下沿取三个点，各自往上找
+         * 第一个不透明的祖先，取多数票；全取不到就返回空串，Kotlin 那边保持原色 ——
+         * 绝不因为读不到而影响功能。
          */
         private const val PAGE_BG_JS =
-            "(function(){var d=document;var c=[d.body,d.documentElement];" +
-                "if(d.body&&d.body.firstElementChild)c.push(d.body.firstElementChild);" +
-                "for(var i=0;i<c.length;i++){var e=c[i];if(!e)continue;" +
-                "var v=getComputedStyle(e).backgroundColor;" +
-                "if(v&&v!=='rgba(0, 0, 0, 0)'&&v!=='transparent'&&v.indexOf('rgba(')!==0)return v;}" +
-                "return '';})()"
+            "(function(){" +
+                "function bgOf(el){while(el){var c=getComputedStyle(el).backgroundColor;" +
+                "if(c&&c!=='rgba(0, 0, 0, 0)'&&c!=='transparent')return c;el=el.parentElement;}return '';}" +
+                "var w=window.innerWidth,h=window.innerHeight;" +
+                "var pts=[[2,h-2],[w-2,h-2],[Math.floor(w/2),h-2]];" +
+                "var votes={},best='',bestN=0;" +
+                "for(var i=0;i<pts.length;i++){" +
+                "var e=document.elementFromPoint(pts[i][0],pts[i][1]);" +
+                "var c=e?bgOf(e):'';if(!c)continue;" +
+                "votes[c]=(votes[c]||0)+1;" +
+                "if(votes[c]>bestN){bestN=votes[c];best=c;}}" +
+                "return best;})()"
 
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
