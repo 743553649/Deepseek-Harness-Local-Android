@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Dsh" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#FF101418</item>
-        <item name="android:navigationBarColor">#FF101418</item>
-        <item name="android:windowBackground">#FF101418</item>
+    <!-- 浅色主题（用户要求全站浅色、禁用深色）。
+         forceDarkAllowed=false 必须有：本项目 targetSdk=28，Android 10+ 对老 targetSdk 的
+         App 默认开启系统强制暗化，不关掉浅色会被系统反相成深色。
+         windowLightStatusBar/windowLightNavigationBar 让系统栏图标在浅底上变深色，
+         否则白图标压在浅色底上看不见（低版本系统会忽略这两个属性）。 -->
+    <style name="Theme.Dsh" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#FFF2F4F7</item>
+        <item name="android:navigationBarColor">#FFF2F4F7</item>
+        <item name="android:windowBackground">#FFF2F4F7</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

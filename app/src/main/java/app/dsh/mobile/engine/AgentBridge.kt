@@ -231,7 +231,7 @@ object AgentBridge {
         }.let { "WS handshake:<br>" + it }
 
         val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DSH diag</title><style>body{font-family:monospace;background:#111;color:#eee;padding:12px;font-size:13px;word-break:break-all}pre{white-space:pre-wrap;background:#1c1c1c;padding:8px;border-radius:6px}h3{color:#7DD3FC;margin:14px 0 4px}</style></head><body>
+<title>DSH diag</title><style>body{font-family:monospace;background:#F2F4F7;color:#191C23;padding:12px;font-size:13px;word-break:break-all}pre{white-space:pre-wrap;background:#F7F8FA;padding:8px;border-radius:6px}h3{color:#2F6BFF;margin:14px 0 4px}</style></head><body>
 <h3>1. WebView UA</h3><pre id="ua"></pre>
 <h3>2. JS API 检测（false=缺失）</h3><pre id="api"></pre>
 <h3>3. 引擎状态</h3><pre>$engineState</pre>

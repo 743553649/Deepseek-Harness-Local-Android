@@ -89,7 +89,7 @@ class ExtensionStoreActivity : Activity() {
 
     private fun sectionHeader(title: String): TextView = TextView(this).apply {
         text = title
-        setTextColor(0xFF7DD3FC.toInt())
+        setTextColor(0xFF2F6BFF.toInt())
         textSize = 13f
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(8), dp(18), dp(8), dp(8))
@@ -103,7 +103,7 @@ class ExtensionStoreActivity : Activity() {
             },
             stateText = TextView(this).apply {
                 textSize = 12f
-                setTextColor(0xFF8A94A3.toInt())
+                setTextColor(0xFF737A87.toInt())
             },
             action = TextView(this).apply {
                 textSize = 13f
@@ -115,7 +115,7 @@ class ExtensionStoreActivity : Activity() {
                 ).apply { marginStart = dp(10) }
             },
             progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                progressTintList = android.content.res.ColorStateList.valueOf(0xFF7DD3FC.toInt())
+                progressTintList = android.content.res.ColorStateList.valueOf(0xFF2F6BFF.toInt())
                 visibility = View.GONE
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(8)
@@ -154,12 +154,12 @@ class ExtensionStoreActivity : Activity() {
                     addView(TextView(this@ExtensionStoreActivity).apply {
                         text = ext.name
                         textSize = 16f
-                        setTextColor(0xFFFFFFFF.toInt())
+                        setTextColor(0xFF191C23.toInt())
                     })
                     addView(TextView(this@ExtensionStoreActivity).apply {
                         text = subLine(ext)
                         textSize = 12f
-                        setTextColor(0xFF8A94A3.toInt())
+                        setTextColor(0xFF737A87.toInt())
                         setPadding(0, dp(2), 0, 0)
                     })
                     addView(refs.stateText.apply { setPadding(0, dp(2), 0, 0) })
@@ -244,11 +244,11 @@ class ExtensionStoreActivity : Activity() {
         if (filled) {
             btn.setBackgroundResource(R.drawable.bg_btn_accent)
             btn.backgroundTintList = android.content.res.ColorStateList.valueOf(bgColor)
-            btn.setTextColor(0xFF101418.toInt())
+            btn.setTextColor(0xFFFFFFFF.toInt())
         } else {
             btn.setBackgroundResource(R.drawable.bg_btn_outline)
             btn.backgroundTintList = null
-            btn.setTextColor(0xFFB0BAC7.toInt())
+            btn.setTextColor(0xFF737A87.toInt())
         }
     }
 
@@ -373,18 +373,18 @@ class ExtensionStoreActivity : Activity() {
     // ================= 杂项 =================
 
     private fun categoryColor(category: String): Int = when (category) {
-        "语言运行时" -> 0xFF6EE7B7.toInt()
-        "编译构建" -> 0xFFFFB74D.toInt()
+        "语言运行时" -> 0xFF10B981.toInt()
+        "编译构建" -> 0xFFF59E0B.toInt()
         else -> 0xFFA78BFA.toInt()
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private companion object {
-        val COLOR_RED = 0xFFFF5A5F.toInt()
-        val COLOR_YELLOW = 0xFFFFB74D.toInt()
-        val COLOR_GREEN = 0xFF6EE7B7.toInt()
-        val COLOR_BLUE = 0xFF7DD3FC.toInt()
-        val COLOR_ORANGE = 0xFFFFB74D.toInt()
+        val COLOR_RED = 0xFFC0392B.toInt()
+        val COLOR_YELLOW = 0xFFB36B00.toInt()
+        val COLOR_GREEN = 0xFF2F7A4A.toInt()
+        val COLOR_BLUE = 0xFF2F6BFF.toInt()
+        val COLOR_ORANGE = 0xFFB36B00.toInt()
     }
 }

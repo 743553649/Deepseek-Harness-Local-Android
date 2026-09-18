@@ -73,7 +73,7 @@ class OnboardingActivity : Activity() {
         findViewById<TextView>(R.id.capRoot).apply {
             text = if (cap.hasRoot) getString(R.string.ob_cap_root_present)
             else getString(R.string.ob_cap_root_absent)
-            setTextColor(if (cap.hasRoot) 0xFF6EE7B7.toInt() else 0xFFFFB74D.toInt())
+            setTextColor(if (cap.hasRoot) 0xFF2F7A4A.toInt() else 0xFFB36B00.toInt())
         }
         refreshShizukuStatus()
 
@@ -120,16 +120,16 @@ class OnboardingActivity : Activity() {
         when {
             Privilege.shizukuUsable() -> {
                 v.text = getString(R.string.ob_cap_shizuku_present)
-                v.setTextColor(0xFF6EE7B7.toInt())
+                v.setTextColor(0xFF2F7A4A.toInt())
             }
             Privilege.shizukuServerRunning() -> {
                 v.text = getString(R.string.ob_cap_shizuku_request)
-                v.setTextColor(0xFFFFB74D.toInt())
+                v.setTextColor(0xFFB36B00.toInt())
                 Privilege.requestShizukuPermission(SHIZUKU_REQ)
             }
             else -> {
                 v.text = getString(R.string.ob_cap_shizuku_absent)
-                v.setTextColor(0xFFFFB74D.toInt())
+                v.setTextColor(0xFFB36B00.toInt())
             }
         }
     }
@@ -158,8 +158,8 @@ class OnboardingActivity : Activity() {
         val l = findViewById<LinearLayout>(R.id.cardLandscape)
         val txtP = findViewById<TextView>(R.id.txtPortrait)
         val txtL = findViewById<TextView>(R.id.txtLandscape)
-        val highlight = 0xFF7DD3FC.toInt()
-        val normal = 0xFF9CA3AF.toInt()
+        val highlight = 0xFF2F6BFF.toInt()
+        val normal = 0xFF737A87.toInt()
         txtP.setTextColor(if (selectedLandscape) normal else highlight)
         txtL.setTextColor(if (selectedLandscape) highlight else normal)
         p.alpha = if (selectedLandscape) 0.6f else 1f

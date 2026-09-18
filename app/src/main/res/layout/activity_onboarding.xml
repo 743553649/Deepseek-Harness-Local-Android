@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="#FF101418">
+    android:background="#FFF2F4F7">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -15,7 +15,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ob_title"
-            android:textColor="#FFFFFFFF"
+            android:textColor="#FF191C23"
             android:textSize="22sp"
             android:textStyle="bold" />
 
@@ -23,7 +23,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/ob_subtitle"
-            android:textColor="#FF9CA3AF"
+            android:textColor="#FF737A87"
             android:textSize="14sp"
             android:layout_marginTop="6dp" />
 
@@ -32,7 +32,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ob_orientation_label"
-            android:textColor="#FF7DD3FC"
+            android:textColor="#FF2F6BFF"
             android:textSize="15sp"
             android:textStyle="bold"
             android:layout_marginTop="28dp" />
@@ -41,7 +41,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/ob_orientation_desc"
-            android:textColor="#FF9CA3AF"
+            android:textColor="#FF737A87"
             android:textSize="13sp"
             android:layout_marginTop="4dp" />
 
@@ -74,7 +74,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/ob_orient_portrait"
-                    android:textColor="#FF9CA3AF"
+                    android:textColor="#FF737A87"
                     android:textSize="13sp"
                     android:layout_marginTop="8dp" />
             </LinearLayout>
@@ -106,7 +106,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/ob_orient_landscape"
-                    android:textColor="#FF9CA3AF"
+                    android:textColor="#FF737A87"
                     android:textSize="13sp"
                     android:layout_marginTop="8dp" />
             </LinearLayout>
@@ -117,7 +117,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ob_priv_label"
-            android:textColor="#FF7DD3FC"
+            android:textColor="#FF2F6BFF"
             android:textSize="15sp"
             android:textStyle="bold"
             android:layout_marginTop="28dp" />
@@ -126,7 +126,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/ob_priv_desc"
-            android:textColor="#FF9CA3AF"
+            android:textColor="#FF737A87"
             android:textSize="13sp"
             android:layout_marginTop="4dp" />
 
@@ -142,14 +142,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/ob_priv_normal"
-                android:textColor="#FFFFFFFF"
+                android:textColor="#FF191C23"
                 android:textSize="15sp" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/ob_priv_normal_desc"
-                android:textColor="#FF9CA3AF"
+                android:textColor="#FF737A87"
                 android:textSize="12sp"
                 android:layout_marginStart="32dp" />
 
@@ -158,7 +158,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/ob_priv_shizuku"
-                android:textColor="#FFFFFFFF"
+                android:textColor="#FF191C23"
                 android:textSize="15sp"
                 android:layout_marginTop="8dp" />
 
@@ -166,7 +166,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/ob_priv_shizuku_desc"
-                android:textColor="#FF9CA3AF"
+                android:textColor="#FF737A87"
                 android:textSize="12sp"
                 android:layout_marginStart="32dp" />
 
@@ -175,7 +175,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/ob_priv_root"
-                android:textColor="#FFFF8A80"
+                android:textColor="#FFC0392B"
                 android:textSize="15sp"
                 android:layout_marginTop="8dp" />
 
@@ -184,7 +184,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/ob_priv_root_desc"
-                android:textColor="#FFFF8A80"
+                android:textColor="#FFC0392B"
                 android:textSize="12sp"
                 android:layout_marginStart="32dp" />
         </RadioGroup>
@@ -200,14 +200,14 @@
                 android:id="@+id/capRoot"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="#FF6EE7B7"
+                android:textColor="#FF2F7A4A"
                 android:textSize="13sp" />
 
             <TextView
                 android:id="@+id/capShizuku"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="#FF6EE7B7"
+                android:textColor="#FF2F7A4A"
                 android:textSize="13sp"
                 android:layout_marginTop="4dp" />
         </LinearLayout>
@@ -218,8 +218,8 @@
             android:layout_height="48dp"
             android:layout_marginTop="28dp"
             android:text="@string/ob_start"
-            android:textColor="#FF101418"
+            android:textColor="#FFFFFFFF"
             android:textSize="16sp"
-            android:backgroundTint="#FF7DD3FC" />
+            android:backgroundTint="#FF2F6BFF" />
     </LinearLayout>
 </ScrollView>

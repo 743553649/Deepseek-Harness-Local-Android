@@ -92,7 +92,7 @@ class SettingsActivity : Activity() {
 
         // —— 其他：重启引擎 ——
         findViewById<LinearLayout>(R.id.rowRestart).setOnClickListener {
-            // 完整 stop→start；MainActivity 的 handleBar/状态栏会随 state 流转刷新
+            // 完整 stop→start；MainActivity 导航栏上的状态文字会随 state 流转刷新
             (application as DshApp).supervisor.restart()
             Toast.makeText(this, getString(android.R.string.ok), Toast.LENGTH_SHORT).show()
         }
@@ -138,7 +138,7 @@ class SettingsActivity : Activity() {
             it.text = getString(
                 if (rootOk) R.string.setting_root_status_yes else R.string.setting_root_status_no
             )
-            it.setTextColor(if (rootOk) 0xFF6EE7B7.toInt() else 0xFF8A94A3.toInt())
+            it.setTextColor(if (rootOk) 0xFF2F7A4A.toInt() else 0xFF737A87.toInt())
         }
         refreshShizuku()
         refreshAccess()
@@ -151,7 +151,7 @@ class SettingsActivity : Activity() {
         val count = ExtensionManager(this).activeCount()
         val v = findViewById<TextView>(R.id.valExt)
         v.text = getString(R.string.setting_ext_active_count, count)
-        v.setTextColor(if (count > 0) 0xFF6EE7B7.toInt() else 0xFF8A94A3.toInt())
+        v.setTextColor(if (count > 0) 0xFF2F7A4A.toInt() else 0xFF737A87.toInt())
     }
 
     /** Shizuku 三态刷新（已授权绿 / 等待授权黄 / 未运行灰） */
@@ -160,16 +160,16 @@ class SettingsActivity : Activity() {
         when {
             Privilege.shizukuUsable() -> {
                 v.text = getString(R.string.setting_shizuku_granted)
-                v.setTextColor(0xFF6EE7B7.toInt())
+                v.setTextColor(0xFF2F7A4A.toInt())
             }
             Privilege.shizukuServerRunning() -> {
                 v.text = getString(R.string.setting_shizuku_request)
-                v.setTextColor(0xFFFFB74D.toInt())
+                v.setTextColor(0xFFB36B00.toInt())
                 Privilege.requestShizukuPermission(SHIZUKU_REQ)
             }
             else -> {
                 v.text = getString(R.string.setting_shizuku_absent)
-                v.setTextColor(0xFF8A94A3.toInt())
+                v.setTextColor(0xFF737A87.toInt())
             }
         }
     }
@@ -182,7 +182,7 @@ class SettingsActivity : Activity() {
         )
         findViewById<TextView>(R.id.valAccess).text = if (on) "已开启" else "未开启"
         findViewById<TextView>(R.id.valAccess).setTextColor(
-            if (on) 0xFF6EE7B7.toInt() else 0xFF8A94A3.toInt()
+            if (on) 0xFF2F7A4A.toInt() else 0xFF737A87.toInt()
         )
     }
 
@@ -247,8 +247,8 @@ class SettingsActivity : Activity() {
         val bar = SeekBar(this).apply {
             max = (MAX_PAGE_SCALE - MIN_PAGE_SCALE) / SCALE_STEP   // 索引 0..20 → 50..150 步长5
             progress = (pageScale - MIN_PAGE_SCALE) / SCALE_STEP
-            progressTintList = android.content.res.ColorStateList.valueOf(0xFF7DD3FC.toInt())
-            thumbTintList = android.content.res.ColorStateList.valueOf(0xFF7DD3FC.toInt())
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF2F6BFF.toInt())
+            thumbTintList = android.content.res.ColorStateList.valueOf(0xFF2F6BFF.toInt())
             setPadding(dp(24), 0, dp(24), 0)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -313,12 +313,12 @@ class SettingsActivity : Activity() {
                 addView(TextView(this@SettingsActivity).apply {
                     text = label
                     textSize = 16f
-                    setTextColor(0xFFFFFFFF.toInt())
+                    setTextColor(0xFF191C23.toInt())
                 })
                 if (sub.isNotEmpty()) addView(TextView(this@SettingsActivity).apply {
                     text = sub
                     textSize = 12f
-                    setTextColor(0xFF8A94A3.toInt())
+                    setTextColor(0xFF737A87.toInt())
                 })
             }
             return LinearLayout(this).apply {
