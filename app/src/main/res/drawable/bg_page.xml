@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 页面底色：竖渐变 + 三团主色光晕（docs/UI-REDESIGN.md §3.5）。
+     光晕不是装饰 —— 玻璃垫在纯色上会看起来像白板，必须有东西可折射。
+     Android 的 radial gradient 只能画正圆（CSS 那边是椭圆），观感上够用。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:endColor="@color/page_bottom"
+                android:startColor="@color/page_top"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- 左上 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:centerX="0.10"
+                android:centerY="0.02"
+                android:endColor="#0096B9F6"
+                android:gradientRadius="260dp"
+                android:startColor="#3396B9F6"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- 右中 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:centerX="0.95"
+                android:centerY="0.26"
+                android:endColor="#0096B9F6"
+                android:gradientRadius="220dp"
+                android:startColor="#2996B9F6"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- 下方 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:centerX="0.50"
+                android:centerY="0.98"
+                android:endColor="#0096B9F6"
+                android:gradientRadius="280dp"
+                android:startColor="#2496B9F6"
+                android:type="radial" />
+        </shape>
+    </item>
+</layer-list>

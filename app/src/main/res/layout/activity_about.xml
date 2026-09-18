@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#FFF2F4F7">
+    android:background="@color/page_top">
 
     <!-- 顶部栏：返回 + 标题（与设置页一致） -->
     <LinearLayout
@@ -11,7 +11,7 @@
         android:layout_height="56dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#FFF2F4F7"
+        android:background="@color/page_top"
         android:elevation="2dp">
 
         <ImageView
@@ -150,7 +150,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/about_repo"
-                        android:textColor="#FF2F6BFF"
+                        android:textColor="@color/accent_ink"
                         android:textSize="13sp"
                         android:layout_marginTop="2dp" />
                 </LinearLayout>

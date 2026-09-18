@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设计令牌（docs/UI-REDESIGN.md §2）。改版前颜色散落在各 XML / Kotlin 里，这里统一收口。
+     注意：仓库里仍有一些历史硬编码色，本次只替换受影响的那些位置，不做全量重构。 -->
+<resources>
+    <!-- 主色：用在「面」上（开关打开态、主按钮底、扩展图标块） -->
+    <color name="accent">#FF96B9F6</color>
+    <!-- 渐变的下一档（按钮/开关的下沿） -->
+    <color name="accent_deep">#FF7BA6F0</color>
+    <!-- 白底上的彩色文字必须用它：#96B9F6 当文字色对比度只有约 2:1，看不清 -->
+    <color name="accent_ink">#FF2E5AA8</color>
+    <!-- 浅蓝底上不能写白字（会糊），用深蓝 -->
+    <color name="accent_on">#FF12325F</color>
+
+    <!-- 墨（正文）/ 次（次要文字）/ 淡（占位、未下载） -->
+    <color name="ink">#FF0F1216</color>
+    <color name="muted">#FF6E7686</color>
+    <color name="faint">#FF9AA2B0</color>
+    <!-- 分组标题（显示 / 权限中心 / 关于…） -->
+    <color name="section">#FF8A93A3</color>
+    <!-- 细线：rgba(15,18,22,.06)，行分隔 -->
+    <color name="hair">#0F0F1216</color>
+
+    <!-- 状态色：绿=已激活/已就绪 黄=已下载未激活 -->
+    <color name="state_ok">#FF1F9D55</color>
+    <color name="state_warn">#FFC08A18</color>
+
+    <!-- 页面底色：竖渐变 + 主色光晕 -->
+    <color name="page_top">#FFF5F7FB</color>
+    <color name="page_bottom">#FFE9EDF5</color>
+</resources>

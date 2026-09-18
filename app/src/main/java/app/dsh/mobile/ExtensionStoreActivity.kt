@@ -3,6 +3,7 @@ package app.dsh.mobile
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.pm.ActivityInfo
+import android.content.res.ColorStateList
 import android.graphics.PorterDuff
 import android.graphics.Typeface
 import android.widget.ImageView
@@ -24,12 +25,12 @@ import kotlinx.coroutines.withContext
 /**
  * 扩展中心（v1.2.0）：自由下载环境扩展（Python / Git / JDK / FFmpeg…）。
  *
- * 三态红绿灯：
- *  - 红  未下载        → 按钮【下载】
+ * 三态红绿灯（沿用 strings.xml 里写明的既有约定）：
+ *  - 灰  未下载        → 按钮【下载】
  *  - 黄  已下载未激活  → 按钮【激活】（并入引擎 PATH，自动重启引擎）
  *  - 绿  已激活可用    → 按钮【停用】；长按整行可卸载
  *
- * 列表为程序化构建（清单约 18 项，无需引入 RecyclerView）；
+ * 列表为程序化构建（清单约 18 项，无需引入 RecyclerView），按分类各包一块玻璃面板；
  * 下载在协程 IO 线程执行，进度经 runOnUiThread 回刷行内 ProgressBar。
  */
 class ExtensionStoreActivity : Activity() {
@@ -74,59 +75,79 @@ class ExtensionStoreActivity : Activity() {
 
     // ================= 列表构建 =================
 
+    /** 按分类分组：每个分类 = 一个分组标题 + 一块玻璃面板（面板里装该分类的行） */
     private fun buildList() {
         container.removeAllViews()
         rowRefs.clear()
         var lastCategory: String? = null
+        var panel: LinearLayout? = null
         items.forEach { ext ->
             if (ext.category != lastCategory) {
                 lastCategory = ext.category
                 container.addView(sectionHeader(ext.category))
+                panel = glassPanel().also { container.addView(it) }
             }
-            container.addView(buildRow(ext))
+            val target = panel ?: return@forEach
+            if (target.childCount > 0) target.addView(divider())
+            target.addView(buildRow(ext))
         }
     }
 
+    /** 分组标题（不是面板的一部分，所以放在面板外面） */
     private fun sectionHeader(title: String): TextView = TextView(this).apply {
         text = title
-        setTextColor(0xFF2F6BFF.toInt())
-        textSize = 13f
+        setTextColor(getColor(R.color.section))
+        textSize = 11.5f
         setTypeface(typeface, Typeface.BOLD)
-        setPadding(dp(8), dp(18), dp(8), dp(8))
+        setPadding(dp(4), dp(22), dp(4), dp(9))
+    }
+
+    private fun glassPanel(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = getDrawable(R.drawable.bg_glass_card)
+    }
+
+    /** 行分隔线：注意与面板左右内边距对齐，别贴到圆角上 */
+    private fun divider(): View = View(this).apply {
+        setBackgroundColor(getColor(R.color.hair))
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+        ).apply { marginStart = dp(16); marginEnd = dp(16) }
     }
 
     private fun buildRow(ext: ExtensionManager.Extension): View {
         val refs = RowRefs(
             dot = View(this).apply {
                 setBackgroundResource(R.drawable.bg_status_dot)
-                layoutParams = LinearLayout.LayoutParams(dp(10), dp(10))
+                layoutParams = LinearLayout.LayoutParams(dp(7), dp(7))
             },
             stateText = TextView(this).apply {
-                textSize = 12f
-                setTextColor(0xFF737A87.toInt())
+                textSize = 11.5f
+                setTextColor(getColor(R.color.muted))
             },
             action = TextView(this).apply {
-                textSize = 13f
+                textSize = 12f
                 gravity = Gravity.CENTER
                 minWidth = dp(64)
-                setPadding(dp(14), dp(5), dp(14), dp(5))
+                minHeight = dp(34)
+                setPadding(dp(16), 0, dp(16), 0)
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)
                 ).apply { marginStart = dp(10) }
             },
             progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                progressTintList = android.content.res.ColorStateList.valueOf(0xFF2F6BFF.toInt())
+                progressTintList = ColorStateList.valueOf(getColor(R.color.accent))
                 visibility = View.GONE
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(8)
-                ).apply { topMargin = dp(6) }
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(4)
+                ).apply { topMargin = dp(8) }
             },
         )
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            // 行内主体：图标 + 文案 + 状态点 + 按钮
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+            // 行内主体：图标 + 文案 + 状态 + 按钮
             val main = LinearLayout(this@ExtensionStoreActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -141,30 +162,35 @@ class ExtensionStoreActivity : Activity() {
                     }
                     setPadding(dp(6), dp(6), dp(6), dp(6))
                     background = getDrawable(R.drawable.bg_icon_chip)
-                    backgroundTintList = android.content.res.ColorStateList.valueOf(
-                        categoryColor(ext.category)
-                    )
+                    backgroundTintList = ColorStateList.valueOf(categoryColor(ext.category))
                     layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
                 })
                 addView(LinearLayout(this@ExtensionStoreActivity).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-                    ).apply { marginStart = dp(14); marginEnd = dp(8) }
+                    ).apply { marginStart = dp(13); marginEnd = dp(8) }
                     addView(TextView(this@ExtensionStoreActivity).apply {
                         text = ext.name
-                        textSize = 16f
-                        setTextColor(0xFF191C23.toInt())
+                        textSize = 14f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setTextColor(getColor(R.color.ink))
                     })
                     addView(TextView(this@ExtensionStoreActivity).apply {
                         text = subLine(ext)
-                        textSize = 12f
-                        setTextColor(0xFF737A87.toInt())
-                        setPadding(0, dp(2), 0, 0)
+                        textSize = 11.5f
+                        setTextColor(getColor(R.color.faint))
+                        setPadding(0, dp(3), 0, 0)
                     })
-                    addView(refs.stateText.apply { setPadding(0, dp(2), 0, 0) })
+                    // 状态行：圆点 + 文案（与预览稿一致，点跟着文字走）
+                    addView(LinearLayout(this@ExtensionStoreActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(0, dp(5), 0, 0)
+                        addView(refs.dot)
+                        addView(refs.stateText.apply { setPadding(dp(6), 0, 0, 0) })
+                    })
                 })
-                addView(refs.dot)
                 addView(refs.action)
             }
             addView(main, LinearLayout.LayoutParams(
@@ -198,21 +224,21 @@ class ExtensionStoreActivity : Activity() {
         val state = manager.state(ext.id)
 
         val (stateLabel, dotColor) = when {
-            downloadingNow -> "安装中…" to COLOR_YELLOW
+            downloadingNow -> "安装中…" to getColor(R.color.state_warn)
             state == ExtensionManager.ExtState.ACTIVATED ->
-                getString(R.string.ext_state_activated) to COLOR_GREEN
+                getString(R.string.ext_state_activated) to getColor(R.color.state_ok)
             state == ExtensionManager.ExtState.DOWNLOADED ->
-                getString(R.string.ext_state_downloaded) to COLOR_YELLOW
-            else -> getString(R.string.ext_state_none) to COLOR_RED
+                getString(R.string.ext_state_downloaded) to getColor(R.color.state_warn)
+            else -> getString(R.string.ext_state_none) to getColor(R.color.faint)
         }
         // 已装扩展在状态行追加实际版本（安装时从 Termux 仓库索引记录）
         val ver = if (!downloadingNow && state != ExtensionManager.ExtState.NOT_DOWNLOADED)
             manager.installedVersion(ext.id)?.let { " · v$it" } ?: "" else ""
         refs.stateText.text = stateLabel + ver
-        refs.dot.backgroundTintList =
-            android.content.res.ColorStateList.valueOf(dotColor)
+        refs.stateText.setTextColor(dotColor)
+        refs.dot.backgroundTintList = ColorStateList.valueOf(dotColor)
 
-        // 按钮：下载(蓝实心) / 激活(橙实心) / 停用(灰描边)；下载中隐藏
+        // 按钮：激活 = 主按钮（主色渐变）；下载 / 停用 = 次要玻璃按钮；下载中隐藏
         when {
             downloadingNow -> {
                 refs.action.visibility = View.GONE
@@ -224,32 +250,27 @@ class ExtensionStoreActivity : Activity() {
                 refs.action.visibility = View.VISIBLE
                 when (state) {
                     ExtensionManager.ExtState.NOT_DOWNLOADED -> {
-                        styleAction(refs.action, getString(R.string.ext_action_download), COLOR_BLUE, true)
+                        styleAction(refs.action, getString(R.string.ext_action_download), false)
                     }
                     ExtensionManager.ExtState.DOWNLOADED -> {
-                        styleAction(refs.action, getString(R.string.ext_action_activate), COLOR_ORANGE, true)
+                        styleAction(refs.action, getString(R.string.ext_action_activate), true)
                     }
                     ExtensionManager.ExtState.ACTIVATED -> {
-                        styleAction(refs.action, getString(R.string.ext_action_deactivate), 0, false)
+                        styleAction(refs.action, getString(R.string.ext_action_deactivate), false)
                     }
                 }
             }
         }
     }
 
-    private fun styleAction(btn: TextView, label: String, bgColor: Int, filled: Boolean) {
+    /** 主按钮=主色渐变 + 深字（浅蓝底上白字会糊）；次要按钮=白玻璃 + 描边 */
+    private fun styleAction(btn: TextView, label: String, primary: Boolean) {
         btn.text = label
         btn.visibility = View.VISIBLE
         btn.isClickable = true
-        if (filled) {
-            btn.setBackgroundResource(R.drawable.bg_btn_accent)
-            btn.backgroundTintList = android.content.res.ColorStateList.valueOf(bgColor)
-            btn.setTextColor(0xFFFFFFFF.toInt())
-        } else {
-            btn.setBackgroundResource(R.drawable.bg_btn_outline)
-            btn.backgroundTintList = null
-            btn.setTextColor(0xFF737A87.toInt())
-        }
+        btn.setBackgroundResource(if (primary) R.drawable.bg_btn_accent else R.drawable.bg_btn_outline)
+        btn.backgroundTintList = null
+        btn.setTextColor(getColor(if (primary) R.color.accent_on else R.color.muted))
     }
 
     private fun refreshHeader() {
@@ -379,12 +400,4 @@ class ExtensionStoreActivity : Activity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-    private companion object {
-        val COLOR_RED = 0xFFC0392B.toInt()
-        val COLOR_YELLOW = 0xFFB36B00.toInt()
-        val COLOR_GREEN = 0xFF2F7A4A.toInt()
-        val COLOR_BLUE = 0xFF2F6BFF.toInt()
-        val COLOR_ORANGE = 0xFFB36B00.toInt()
-    }
 }

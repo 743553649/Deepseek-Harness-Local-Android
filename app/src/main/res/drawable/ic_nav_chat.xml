@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底栏「对话」图标：线稿风（描边 1.8），颜色由代码着色（选中白 / 未选中灰）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="17dp"
+    android:height="17dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M21,12 A8,8 0 0,1 9.5,19.2 L4,20.5 L5.3,16.1 A8,8 0 0,1 21,12 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.8" />
+</vector>

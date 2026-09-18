@@ -1,48 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  扩展中心（液态玻璃重做）。
+  列表行本身是代码拼的（见 ExtensionStoreActivity），这里只提供页面骨架：
+  顶栏 → 副标题（架构 · 激活计数）→ 滚动区（每类一块玻璃面板）。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#FFF2F4F7">
+    android:background="@drawable/bg_page"
+    android:orientation="vertical">
 
     <!-- 顶部栏：返回箭头 + 标题 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="56dp"
-        android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#FFF2F4F7"
-        android:elevation="2dp">
+        android:orientation="horizontal">
 
         <ImageView
             android:id="@+id/btnBack"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:padding="12dp"
-            android:src="@drawable/ic_back"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/settings_back" />
+            android:contentDescription="@string/settings_back"
+            android:padding="12dp"
+            android:src="@drawable/ic_back" />
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center_vertical"
+            android:paddingStart="4dp"
             android:text="@string/ext_title"
-            android:textColor="#FF191C23"
+            android:textColor="@color/ink"
             android:textSize="20sp"
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- 副标题：设备架构 + 激活计数 -->
+    <!-- 副标题：设备架构 + 激活计数（机器数据走 monospace） -->
     <TextView
         android:id="@+id/tvSubtitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingHorizontal="24dp"
+        android:fontFamily="monospace"
+        android:paddingHorizontal="20dp"
         android:paddingBottom="6dp"
-        android:textColor="#FF737A87"
-        android:textSize="12sp" />
+        android:textColor="@color/muted"
+        android:textSize="11.5sp" />
 
     <ScrollView
         android:layout_width="match_parent"

@@ -158,8 +158,8 @@ class OnboardingActivity : Activity() {
         val l = findViewById<LinearLayout>(R.id.cardLandscape)
         val txtP = findViewById<TextView>(R.id.txtPortrait)
         val txtL = findViewById<TextView>(R.id.txtLandscape)
-        val highlight = 0xFF2F6BFF.toInt()
-        val normal = 0xFF737A87.toInt()
+        val highlight = getColor(R.color.accent_ink)
+        val normal = getColor(R.color.muted)
         txtP.setTextColor(if (selectedLandscape) normal else highlight)
         txtL.setTextColor(if (selectedLandscape) highlight else normal)
         p.alpha = if (selectedLandscape) 0.6f else 1f

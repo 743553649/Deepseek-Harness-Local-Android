@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 玻璃面板 / 分组容器：白 80%→58% 渐变 + 1dp 白描边 + 圆角 22dp（docs/UI-REDESIGN.md §3.3）。
+     斜向高光在 Android 里要写 LinearGradient 角度，收益不大，按文档省略。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#CCFFFFFF" />
+            <stroke
+                android:width="1dp"
+                android:color="#B8FFFFFF" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+    <item
+        android:bottom="1dp"
+        android:left="1dp"
+        android:right="1dp"
+        android:top="1dp">
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:endColor="#94FFFFFF"
+                android:startColor="#CCFFFFFF"
+                android:type="linear" />
+            <corners android:radius="21dp" />
+        </shape>
+    </item>
+</layer-list>

@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="#FFF2F4F7">
+    android:background="@color/page_top">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -32,7 +32,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ob_orientation_label"
-            android:textColor="#FF2F6BFF"
+            android:textColor="@color/accent_ink"
             android:textSize="15sp"
             android:textStyle="bold"
             android:layout_marginTop="28dp" />
@@ -117,7 +117,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ob_priv_label"
-            android:textColor="#FF2F6BFF"
+            android:textColor="@color/accent_ink"
             android:textSize="15sp"
             android:textStyle="bold"
             android:layout_marginTop="28dp" />
@@ -218,8 +218,8 @@
             android:layout_height="48dp"
             android:layout_marginTop="28dp"
             android:text="@string/ob_start"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/accent_on"
             android:textSize="16sp"
-            android:backgroundTint="#FF2F6BFF" />
+            android:backgroundTint="@color/accent" />
     </LinearLayout>
 </ScrollView>

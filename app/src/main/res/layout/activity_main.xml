@@ -1,104 +1,191 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  界面骨架（浅色 + 左侧抽屉导航）。
+  界面骨架（液态玻璃 + 底部悬浮玻璃岛导航）。
 
   分层：
-    root  ├─ stage（导航栏 + 网页 + 进度条）—— 抽屉展开时整体缩小退后、变暗
-          ├─ scrim（遮罩）—— 负责变暗、点一下关抽屉、挡住网页误触
-          └─ drawer（抽屉）—— 宽度在代码里按屏宽 78% 设置
+    root ├─ 竖向 LinearLayout
+    │       ├─ WebView（weight=1）
+    │       └─ navArea（72dp 纯白占位区，里面是悬浮玻璃岛）
+    ├─ capsule（顶部小胶囊：引擎未就绪时说明原因 / 预览模式时变「← 主页」）
+    └─ loading（引擎就绪前的加载页，覆盖层）
 
-  说明：原「半透明悬浮工具栏 + 可拖把手」已按需求整体移除，
-  引擎状态与设置入口迁到常驻导航栏与抽屉里。
+  ⚠️ 底栏绝不能盖住网页的输入框（docs/UI-REDESIGN.md §4.2）：
+    - 用竖向 LinearLayout 让 WebView 自己变矮，**不要**用 FrameLayout 把岛叠在 WebView 上；
+    - **不要**给 WebView 设 paddingBottom（padding 不改变网页视口，网页不会让位）；
+    - 留白区底色必须是纯白，和网页白底连成一片，交界处不画任何线 —— 「无缝」的全部秘密。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FFE9EBF0">
+    android:background="#FFFFFFFF">
 
-    <FrameLayout
-        android:id="@+id/stage"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FFFFFFFF"
-        android:elevation="8dp">
+        android:orientation="vertical">
 
-        <LinearLayout
+        <WebView
+            android:id="@+id/webView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical">
+            android:layout_height="0dp"
+            android:layout_weight="1" />
 
-            <!-- 常驻导航栏：左汉堡 + 引擎状态（原悬浮工具栏的状态文字搬到这里）-->
-            <LinearLayout
-                android:id="@+id/navbar"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:background="@drawable/bg_navbar"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+        <!-- 底栏占位区：72dp（含底部 14dp 间距） -->
+        <FrameLayout
+            android:id="@+id/navArea"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:background="#FFFFFFFF"
+            android:clipChildren="false">
 
-                <ImageView
-                    android:id="@+id/btnMenu"
-                    android:layout_width="44dp"
-                    android:layout_height="match_parent"
-                    android:padding="13dp"
-                    android:src="@drawable/ic_menu"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:contentDescription="@string/nav_menu" />
+            <!-- 悬浮玻璃岛：174×45dp，圆角 24dp -->
+            <FrameLayout
+                android:id="@+id/navIsland"
+                android:layout_width="174dp"
+                android:layout_height="45dp"
+                android:layout_gravity="top|center_horizontal"
+                android:layout_marginTop="13dp"
+                android:background="@drawable/bg_glass_island"
+                android:clipChildren="false"
+                android:elevation="12dp"
+                android:padding="3dp">
 
-                <TextView
-                    android:id="@+id/statusBar"
+                <!-- 选中态药丸：宽度在代码里按岛内容宽 / 3 算，别写死 dp -->
+                <View
+                    android:id="@+id/navPill"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:paddingHorizontal="8dp"
-                    android:textColor="#FF737A87"
-                    android:textSize="13sp"
-                    android:gravity="center_vertical"
-                    android:singleLine="true"
-                    android:ellipsize="end" />
+                    android:layout_gravity="top|start"
+                    android:background="@drawable/bg_nav_pill" />
 
-                <!-- 预览模式返回按钮：仅当 WebView 位于非引擎端口的回环页面时显示 -->
-                <TextView
-                    android:id="@+id/btnBack"
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:gravity="center"
-                    android:paddingHorizontal="14dp"
-                    android:text="@string/btn_back"
-                    android:textColor="#FF2F6BFF"
-                    android:textSize="13sp"
-                    android:visibility="gone"
-                    android:background="?android:attr/selectableItemBackground" />
-            </LinearLayout>
+                    android:orientation="horizontal">
 
-            <WebView
-                android:id="@+id/webView"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
-        </LinearLayout>
+                    <LinearLayout
+                        android:id="@+id/navChat"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
 
-    </FrameLayout>
+                        <ImageView
+                            android:id="@+id/navChatIcon"
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_nav_chat" />
+
+                        <TextView
+                            android:id="@+id/navChatText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="1dp"
+                            android:text="@string/nav_chat"
+                            android:textColor="#FF7A8292"
+                            android:textSize="9.5sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/navExt"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:id="@+id/navExtIcon"
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_nav_ext" />
+
+                        <TextView
+                            android:id="@+id/navExtText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="1dp"
+                            android:text="@string/nav_ext"
+                            android:textColor="#FF7A8292"
+                            android:textSize="9.5sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/navSettings"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+
+                        <ImageView
+                            android:id="@+id/navSettingsIcon"
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_nav_settings" />
+
+                        <TextView
+                            android:id="@+id/navSettingsText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="1dp"
+                            android:text="@string/nav_settings"
+                            android:textColor="#FF7A8292"
+                            android:textSize="9.5sp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </FrameLayout>
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- 顶部小胶囊：唯一允许出现在对话页上的 App 元素（§4.5 / §4.6）。
+         elevation 要压过加载页（11dp），否则引擎没就绪时看不到它。 -->
+    <LinearLayout
+        android:id="@+id/capsule"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_glass_pill"
+        android:elevation="12dp"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/capsuleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxWidth="260dp"
+            android:singleLine="true"
+            android:textColor="@color/muted"
+            android:textSize="12.5sp" />
+    </LinearLayout>
 
     <!-- 加载页：引擎侧没就绪时盖住网页；网页首帧渲染完成后淡出 -->
     <LinearLayout
         android:id="@+id/loading"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FFF2F4F7"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:elevation="11dp"
+        android:background="@drawable/bg_page"
         android:clickable="true"
-        android:focusable="true">
+        android:elevation="11dp"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical">
 
         <!-- 应用图标居中（用真正的启动图标；自适应图标 API 26+ 可直接放进 ImageView） -->
         <ImageView
             android:layout_width="96dp"
             android:layout_height="96dp"
-            android:src="@drawable/ic_launcher"
-            android:contentDescription="@string/app_name" />
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_launcher" />
 
         <!-- 图标正下方的启动信息（只说"在干什么"，不出现端口/域名） -->
         <TextView
@@ -108,7 +195,7 @@
             android:layout_marginTop="22dp"
             android:gravity="center"
             android:paddingHorizontal="32dp"
-            android:textColor="#FF191C23"
+            android:textColor="@color/ink"
             android:textSize="14sp" />
 
         <ProgressBar
@@ -117,7 +204,7 @@
             android:layout_width="30dp"
             android:layout_height="30dp"
             android:layout_marginTop="18dp"
-            android:indeterminateTint="#FF2F6BFF" />
+            android:indeterminateTint="@color/accent" />
 
         <!-- 安装/解压进度：null 时转圈，有值时走确定性百分比 -->
         <ProgressBar
@@ -125,252 +212,12 @@
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="220dp"
             android:layout_height="wrap_content"
-            android:minHeight="3dp"
-            android:maxHeight="3dp"
             android:layout_marginTop="18dp"
             android:indeterminate="true"
-            android:progressTint="#FF2F6BFF"
+            android:maxHeight="3dp"
+            android:minHeight="3dp"
             android:progressBackgroundTint="#FFE7E9EF"
+            android:progressTint="@color/accent"
             android:visibility="gone" />
-    </LinearLayout>
-
-    <!-- 遮罩：抽屉关闭时隐藏（否则会挡住网页的一切触摸） -->
-    <View
-        android:id="@+id/scrim"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="#000000"
-        android:elevation="10dp"
-        android:alpha="0"
-        android:visibility="gone"
-        android:clickable="true"
-        android:focusable="true" />
-
-    <!-- 抽屉：宽度由代码按屏宽 78% 设定 -->
-    <LinearLayout
-        android:id="@+id/drawer"
-        android:layout_width="300dp"
-        android:layout_height="match_parent"
-        android:layout_gravity="start"
-        android:orientation="vertical"
-        android:background="@drawable/bg_drawer"
-        android:elevation="12dp">
-
-        <!-- 抽屉头部：品牌 + 引擎信息（原悬浮窗展示的内容全落在这里） -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp"
-            android:background="@drawable/bg_navbar">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="34dp"
-                    android:layout_height="34dp"
-                    android:background="@drawable/bg_icon_chip"
-                    android:backgroundTint="#FF2F6BFF"
-                    android:gravity="center"
-                    android:text="@string/drawer_logo"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="10dp"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/app_name"
-                        android:textColor="#FF191C23"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:singleLine="true"
-                        android:ellipsize="end" />
-
-                    <TextView
-                        android:id="@+id/drawerStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:textColor="#FF737A87"
-                        android:textSize="11sp"
-                        android:singleLine="true"
-                        android:ellipsize="end" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/drawerAddress"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:textColor="#FF737A87"
-                android:textSize="12sp"
-                android:singleLine="true"
-                android:ellipsize="end" />
-
-            <TextView
-                android:id="@+id/drawerVersion"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:textColor="#FF737A87"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <!-- 菜单项一律不设 clickable：点击由 MainActivity 的触摸监听统一分发，
-             这样在菜单项上按住右滑也能拖动抽屉 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:padding="10dp">
-
-            <LinearLayout
-                android:id="@+id/drawerItemChat"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="12dp">
-
-                <View
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
-                    android:background="@drawable/bg_status_dot"
-                    android:backgroundTint="#FF737A87" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="@string/drawer_chat"
-                    android:textColor="#FF191C23"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="end"
-                    android:text="@string/drawer_chat_hint"
-                    android:textColor="#FF737A87"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/drawerItemSettings"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="12dp">
-
-                <View
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
-                    android:background="@drawable/bg_status_dot"
-                    android:backgroundTint="#FF737A87" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="@string/settings_title"
-                    android:textColor="#FF191C23"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/drawerItemExt"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="12dp">
-
-                <View
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
-                    android:background="@drawable/bg_status_dot"
-                    android:backgroundTint="#FF737A87" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="@string/ext_title"
-                    android:textColor="#FF191C23"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/drawerItemAbout"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="12dp">
-
-                <View
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
-                    android:background="@drawable/bg_status_dot"
-                    android:backgroundTint="#FF737A87" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="@string/about_title"
-                    android:textColor="#FF191C23"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/drawerItemRestart"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="12dp">
-
-                <View
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
-                    android:background="@drawable/bg_status_dot"
-                    android:backgroundTint="#FF2F6BFF" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="@string/setting_restart_engine"
-                    android:textColor="#FF191C23"
-                    android:textSize="13sp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- 抽屉底部：主题锁定为浅色（深色模式已按需求禁用） -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_navbar"
-            android:padding="16dp"
-            android:text="@string/drawer_theme"
-            android:textColor="#FF737A87"
-            android:textSize="11sp" />
     </LinearLayout>
 </FrameLayout>

@@ -15,14 +15,18 @@
     <string name="btn_restart">重启</string>
     <string name="btn_back">← 主页</string>
 
-    <!-- 导航栏 + 抽屉（浅色导航改版） -->
-    <string name="nav_menu">导航菜单</string>
-    <string name="drawer_logo">DS</string>
-    <string name="drawer_chat">对话</string>
-    <string name="drawer_chat_hint">底层常驻</string>
-    <string name="drawer_engine_address">访问地址 %1$s</string>
-    <string name="drawer_engine_version">版本 %1$s</string>
-    <string name="drawer_theme">主题：浅色（深色模式已禁用）</string>
+    <!-- 底部玻璃岛导航（液态玻璃改版：抽屉与顶部汉堡栏已移除） -->
+    <string name="nav_chat">对话</string>
+    <string name="nav_ext">扩展</string>
+    <string name="nav_settings">设置</string>
+
+    <!-- 引擎状态的短文案：对话页顶部小胶囊（§4.5）与设置页引擎卡片共用 -->
+    <string name="engine_state_idle">引擎未运行</string>
+    <string name="engine_state_starting">引擎启动中…</string>
+    <string name="engine_state_ready">引擎已就绪</string>
+    <string name="engine_state_safe">安全模式运行中</string>
+    <string name="engine_state_backoff">进程异常退出，%1$d 秒后重启</string>
+    <string name="engine_state_failed">引擎启动失败：%1$s</string>
 
     <!-- 启动加载页文案：只描述"在干什么"，不出现端口/域名 -->
     <string name="loading_boot">正在启动引擎…</string>
@@ -80,7 +84,7 @@
     <string name="settings_back">返回</string>
     <string name="settings_section_display">显示</string>
     <string name="settings_section_priv">权限中心</string>
-    <string name="settings_section_other">其他</string>
+    <string name="settings_section_about">关于</string>
 
     <string name="setting_landscape">横屏模式</string>
     <string name="setting_landscape_sub">开启后按电脑比例桌面渲染，自动锁横屏</string>
@@ -122,11 +126,13 @@
     <string name="setting_shizuku_request">等待授权</string>
     <string name="setting_shizuku_absent">未运行</string>
     <string name="setting_access">屏幕点击（无障碍）</string>
+    <string name="setting_access_on">已开启</string>
+    <string name="setting_access_off">未开启</string>
     <string name="setting_access_sub_on">已开启，可模拟屏幕点击</string>
     <string name="setting_access_sub_off">未开启，点击去系统设置开启</string>
 
     <string name="setting_restart_engine">重启引擎</string>
-    <string name="setting_restart_engine_sub">重新加载运行时与插件（进程崩溃自愈）</string>
+    <string name="setting_restart_engine_sub">重新加载运行时与插件</string>
     <string name="setting_about">关于</string>
     <string name="setting_about_sub">DSH Mobile · 版本 %1$s</string>
 

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底栏选中态药丸：深色液体块，在三个格子间平移（高 39dp = 岛高 45 - 上下各 3dp）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="#CC12151A"
+        android:startColor="#F012151A"
+        android:type="linear" />
+    <corners android:radius="21dp" />
+</shape>

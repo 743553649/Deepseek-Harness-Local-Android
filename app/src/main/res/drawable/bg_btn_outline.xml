@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 描边胶囊按钮（停用） -->
+<!-- 次要按钮（下载 / 停用）：透明玻璃块 + 1dp 白描边 + 全圆角 34dp 高。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#00000000" />
+    <solid android:color="#A8FFFFFF" />
     <stroke
         android:width="1dp"
-        android:color="#FFE7E9EF" />
-    <corners android:radius="16dp" />
+        android:color="#D9FFFFFF" />
+    <corners android:radius="999dp" />
 </shape>

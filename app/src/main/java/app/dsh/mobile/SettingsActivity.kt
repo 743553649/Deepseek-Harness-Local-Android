@@ -1,37 +1,54 @@
 package app.dsh.mobile
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import app.dsh.mobile.engine.ExtensionManager
+import app.dsh.mobile.engine.EngineSupervisor
 import app.dsh.mobile.engine.PrivMode
 import app.dsh.mobile.engine.Privilege
 import app.dsh.mobile.service.EngineService
 
 /**
- * 独立设置页（MIUI 分组卡片风格，替代原先的悬浮菜单）。
+ * 设置页（液态玻璃重做）。四个区块：
+ *  - 引擎卡片（主角）：状态 / 地址 / 版本 / 重启引擎 —— 「引擎信息」从原抽屉并到这里
+ *  - 显示：横屏模式、流体云状态岛、页面缩放
+ *  - 权限中心：运行权限模式、Root 能力、Shizuku 状态、屏幕点击（无障碍）
+ *  - 关于：应用名/版本、开源地址 —— 原独立「关于」页的内容并到这里
  *
- * 三个分组：
- *  - 显示：横屏模式、页面缩放
- *  - 权限中心（统一管理运行权限与无障碍）：运行权限模式、Root 能力状态、Shizuku 状态、屏幕点击（无障碍）
- *  - 其他：重启引擎、关于
+ * 引擎状态取一次快照即可：本页是独立 Activity，拿不到 MainActivity 的状态流，
+ * 所以 onCreate / onResume 时都从 (application as DshApp).supervisor 现取。
  *
- * 权限切换与缩放均复用 MainActivity 的既有决策（Root 双警告、缩放 −/＋ 步进、
- * 无障碍跳系统设置），落库到同一组 SharedPreferences，MainActivity 在 onResume 重新读取生效。
+ * 权限切换与缩放均复用既有决策（Root 双警告、缩放 −/＋ 步进、无障碍跳系统设置），
+ * 落库到同一组 SharedPreferences，MainActivity 在 onResume 重新读取生效。
  */
 class SettingsActivity : Activity() {
 
     private var landscape = false
     private var pageScale = DEFAULT_PAGE_SCALE
+
+    private lateinit var swLandscape: GlassSwitch
+    private lateinit var swIsland: GlassSwitch
+    private lateinit var engineDot: View
+    private lateinit var engineState: TextView
+    private lateinit var engineVersion: TextView
+    private lateinit var engineAddress: TextView
+
+    /** 引擎卡片状态点的「呼吸」动画（仅就绪时播放，全页唯一一处自发动画） */
+    private var dotAnimator: ValueAnimator? = null
 
     /** 当前打开的权限选择对话框（选完/切换中转时关闭） */
     private var privPickDialog: AlertDialog? = null
@@ -54,12 +71,26 @@ class SettingsActivity : Activity() {
 
         rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuPermListener)
 
+        // —— 引擎卡片 ——
+        engineDot = findViewById(R.id.engineDot)
+        engineState = findViewById(R.id.engineState)
+        engineVersion = findViewById(R.id.engineVersion)
+        engineAddress = findViewById(R.id.engineAddress)
+        engineVersion.text = "v${versionName()}"
+        findViewById<LinearLayout>(R.id.rowRestart).setOnClickListener {
+            // 完整 stop→start；对话页顶部胶囊与状态会随 state 流转刷新
+            (application as DshApp).supervisor.restart()
+            Toast.makeText(this, getString(android.R.string.ok), Toast.LENGTH_SHORT).show()
+        }
+
         // —— 顶部返回 ——
         findViewById<ImageView>(R.id.btnBack).setOnClickListener { finish() }
 
-        // —— 显示：横屏模式 ——
+        // —— 显示：横屏模式（玻璃开关）——
+        swLandscape = findViewById(R.id.swLandscape)
+        swLandscape.onCheckedChange = { on -> applyLandscape(on) }
         findViewById<LinearLayout>(R.id.rowLandscape).setOnClickListener {
-            toggleLandscape()
+            applyLandscape(!swLandscape.isChecked)
         }
 
         // —— 显示：页面缩放 ——
@@ -67,17 +98,16 @@ class SettingsActivity : Activity() {
             showScaleDialog()
         }
 
+        // —— 显示：流体云状态岛开关（系统不支持时置灰，别给个点了没反应的开关）——
+        swIsland = findViewById(R.id.swIsland)
+        swIsland.onCheckedChange = { on -> applyIsland(on) }
+        findViewById<LinearLayout>(R.id.rowIsland).setOnClickListener {
+            if (FluidCloud.supported) applyIsland(!swIsland.isChecked)
+        }
+
         // —— 权限中心：运行权限模式 ——
         findViewById<LinearLayout>(R.id.rowPriv).setOnClickListener {
             showPrivDialog()
-        }
-
-        // —— 显示：流体云状态岛开关（系统不支持时置灰，别给个点了没反应的开关） ——
-        val rowIsland = findViewById<LinearLayout>(R.id.rowIsland)
-        if (FluidCloud.supported) {
-            rowIsland.setOnClickListener { toggleIsland() }
-        } else {
-            rowIsland.alpha = 0.35f
         }
 
         // —— 权限中心：屏幕点击（无障碍） ——
@@ -85,23 +115,12 @@ class SettingsActivity : Activity() {
             handleAccessibility()
         }
 
-        // —— 扩展中心 ——
-        findViewById<LinearLayout>(R.id.rowExt).setOnClickListener {
-            startActivity(Intent(this, ExtensionStoreActivity::class.java))
-        }
-
-        // —— 其他：重启引擎 ——
-        findViewById<LinearLayout>(R.id.rowRestart).setOnClickListener {
-            // 完整 stop→start；MainActivity 导航栏上的状态文字会随 state 流转刷新
-            (application as DshApp).supervisor.restart()
-            Toast.makeText(this, getString(android.R.string.ok), Toast.LENGTH_SHORT).show()
-        }
-
-        // —— 其他：关于 ——
-        findViewById<TextView>(R.id.subAbout).text =
-            getString(R.string.setting_about_sub, versionName())
-        findViewById<LinearLayout>(R.id.rowAbout).setOnClickListener {
-            startActivity(Intent(this, AboutActivity::class.java))
+        // —— 关于：版本 + 开源地址（点击复制，与原「关于」页行为一致） ——
+        findViewById<TextView>(R.id.valAboutVersion).text = versionName()
+        findViewById<LinearLayout>(R.id.rowRepo).setOnClickListener {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("dsh-android", getString(R.string.about_repo)))
+            Toast.makeText(this, "已复制仓库地址", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -117,73 +136,120 @@ class SettingsActivity : Activity() {
     }
 
     override fun onDestroy() {
+        dotAnimator?.cancel()
         rikka.shizuku.Shizuku.removeRequestPermissionResultListener(shizukuPermListener)
         super.onDestroy()
     }
 
-    /** 全量刷新：横屏值 + 缩放值 + 权限状态行 + 无障碍 */
+    /** 全量刷新：引擎卡片 + 两个开关值 + 权限状态行 + 无障碍 */
     private fun refreshAll() {
         val prefs = getSharedPreferences(PREFS_UI, MODE_PRIVATE)
         landscape = prefs.getBoolean(KEY_LANDSCAPE, false)
         pageScale = prefs.getInt(KEY_PAGE_SCALE, DEFAULT_PAGE_SCALE)
 
-        findViewById<TextView>(R.id.valLandscape).text = getString(
-            if (landscape) R.string.setting_orient_landscape else R.string.setting_orient_portrait
-        )
+        swLandscape.isChecked = landscape
+        swIsland.isChecked = FluidCloud.enabled(this)
+        // 系统不支持流体云时：开关藏起来，右侧用文字说明，别给个点了没反应的开关
+        val islandRow = findViewById<TextView>(R.id.valIsland)
+        swIsland.visibility = if (FluidCloud.supported) View.VISIBLE else View.GONE
+        islandRow.visibility = if (FluidCloud.supported) View.GONE else View.VISIBLE
+        if (!FluidCloud.supported) islandRow.text = getString(R.string.setting_island_unsupported)
+
         findViewById<TextView>(R.id.valScale).text = "$pageScale%"
-        findViewById<TextView>(R.id.valIsland).text = islandLabel()
         findViewById<TextView>(R.id.valPriv).text = privLabel(Privilege.getMode(this))
+
+        val mute = getColor(R.color.muted)
+        val ok = getColor(R.color.state_ok)
         findViewById<TextView>(R.id.valRootStatus).let {
             val rootOk = Privilege.rootAvailableMinimal()
             it.text = getString(
                 if (rootOk) R.string.setting_root_status_yes else R.string.setting_root_status_no
             )
-            it.setTextColor(if (rootOk) 0xFF2F7A4A.toInt() else 0xFF737A87.toInt())
+            it.setTextColor(if (rootOk) ok else mute)
         }
+        refreshEngine()
         refreshShizuku()
         refreshAccess()
-        refreshExt()
-        // 缩放副标题文案无需变；图标着色按打开时状态由静态 XML 决定
     }
 
-    /** 扩展中心入口：显示已激活扩展数（>0 变绿提示已并入引擎） */
-    private fun refreshExt() {
-        val count = ExtensionManager(this).activeCount()
-        val v = findViewById<TextView>(R.id.valExt)
-        v.text = getString(R.string.setting_ext_active_count, count)
-        v.setTextColor(if (count > 0) 0xFF2F7A4A.toInt() else 0xFF737A87.toInt())
+    /** 引擎卡片：状态 + 状态点颜色 + 地址（拿不到状态流，每次进页面现取一次快照） */
+    private fun refreshEngine() {
+        val supervisor = (application as DshApp).supervisor
+        val state = supervisor.state.value
+        engineAddress.text = "127.0.0.1:${supervisor.healthyPort}"
+
+        val label = when (state) {
+            is EngineSupervisor.State.Healthy -> getString(R.string.engine_state_ready)
+            is EngineSupervisor.State.SafeMode -> getString(R.string.engine_state_safe)
+            is EngineSupervisor.State.Installing,
+            is EngineSupervisor.State.Starting -> getString(R.string.engine_state_starting)
+            is EngineSupervisor.State.Backoff ->
+                getString(R.string.engine_state_backoff, state.delayMs / 1000)
+            is EngineSupervisor.State.Failed -> getString(R.string.engine_state_failed, state.reason)
+            else -> getString(R.string.engine_state_idle)
+        }
+        val ready = state is EngineSupervisor.State.Healthy ||
+            state is EngineSupervisor.State.SafeMode
+        engineState.text = label
+        renderEngineDot(
+            ready = ready,
+            color = when {
+                ready -> getColor(R.color.state_ok)
+                state is EngineSupervisor.State.Installing ||
+                    state is EngineSupervisor.State.Starting ||
+                    state is EngineSupervisor.State.Backoff -> getColor(R.color.state_warn)
+                else -> getColor(R.color.faint)
+            },
+        )
+    }
+
+    /** 状态点：就绪时绿色呼吸（尊重系统的「减少动态效果」），其余用黄/灰常亮 */
+    private fun renderEngineDot(ready: Boolean, color: Int) {
+        engineDot.backgroundTintList = ColorStateList.valueOf(color)
+        dotAnimator?.cancel()
+        dotAnimator = null
+        engineDot.alpha = 1f
+        if (!ready || Motion.reduced(this)) return
+        dotAnimator = ValueAnimator.ofFloat(1f, 0.45f).apply {
+            duration = BREATH_MS
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { engineDot.alpha = it.animatedValue as Float }
+            start()
+        }
     }
 
     /** Shizuku 三态刷新（已授权绿 / 等待授权黄 / 未运行灰） */
     private fun refreshShizuku() {
+        val mute = getColor(R.color.muted)
+        val ok = getColor(R.color.state_ok)
+        val warn = getColor(R.color.state_warn)
         val v = findViewById<TextView>(R.id.valShizuku)
         when {
             Privilege.shizukuUsable() -> {
                 v.text = getString(R.string.setting_shizuku_granted)
-                v.setTextColor(0xFF2F7A4A.toInt())
+                v.setTextColor(ok)
             }
             Privilege.shizukuServerRunning() -> {
                 v.text = getString(R.string.setting_shizuku_request)
-                v.setTextColor(0xFFB36B00.toInt())
+                v.setTextColor(warn)
                 Privilege.requestShizukuPermission(SHIZUKU_REQ)
             }
             else -> {
                 v.text = getString(R.string.setting_shizuku_absent)
-                v.setTextColor(0xFF737A87.toInt())
+                v.setTextColor(mute)
             }
         }
     }
 
     /** 无障碍状态刷新 */
     private fun refreshAccess() {
+        val mute = getColor(R.color.muted)
+        val ok = getColor(R.color.state_ok)
         val on = DshAccessibilityService.isEnabled()
-        findViewById<TextView>(R.id.subAccess).text = getString(
-            if (on) R.string.setting_access_sub_on else R.string.setting_access_sub_off
-        )
-        findViewById<TextView>(R.id.valAccess).text = if (on) "已开启" else "未开启"
-        findViewById<TextView>(R.id.valAccess).setTextColor(
-            if (on) 0xFF2F7A4A.toInt() else 0xFF737A87.toInt()
-        )
+        val v = findViewById<TextView>(R.id.valAccess)
+        v.text = getString(if (on) R.string.setting_access_on else R.string.setting_access_off)
+        v.setTextColor(if (on) ok else mute)
     }
 
     private fun privLabel(mode: PrivMode): String = when (mode) {
@@ -194,16 +260,14 @@ class SettingsActivity : Activity() {
 
     // ================= 显示：横屏 =================
 
-    private fun toggleLandscape() {
-        landscape = !landscape
+    private fun applyLandscape(on: Boolean) {
+        landscape = on
+        swLandscape.isChecked = on
         getSharedPreferences(PREFS_UI, MODE_PRIVATE)
-            .edit().putBoolean(KEY_LANDSCAPE, landscape).apply()
+            .edit().putBoolean(KEY_LANDSCAPE, on).apply()
         // 注意：这里【不能】设置 requestedOrientation——它作用于设置页自身，
         // 会把本应锁竖屏的设置页也转横。朝向切换由 MainActivity.onResume
         // 检测偏好变化后统一应用（返回主界面才生效）。
-        findViewById<TextView>(R.id.valLandscape).text = getString(
-            if (landscape) R.string.setting_orient_landscape else R.string.setting_orient_portrait
-        )
     }
 
     // ================= 显示：流体云状态岛 =================
@@ -213,22 +277,15 @@ class SettingsActivity : Activity() {
      * **不重启引擎** —— 开关不该打断正在跑的会话。
      * 服务没在跑时不发意图（免得"改个开关把引擎拉起来"），只提示下次启动生效。
      */
-    private fun toggleIsland() {
-        val on = !FluidCloud.enabled(this)
+    private fun applyIsland(on: Boolean) {
+        if (!FluidCloud.supported) return
+        swIsland.isChecked = on
         getSharedPreferences(PREFS_UI, MODE_PRIVATE)
             .edit().putBoolean(FluidCloud.KEY_ISLAND_ENABLED, on).apply()
-        findViewById<TextView>(R.id.valIsland).text = islandLabel()
         if (!on) FluidCloud.hide(this)   // 关掉时立刻收岛；开着时由服务重新挂上
         if (!EngineService.refreshNotificationIfRunning(this)) {
             Toast.makeText(this, getString(R.string.setting_island_idle_hint), Toast.LENGTH_SHORT).show()
         }
-    }
-
-    /** 右侧当前值：系统不支持 → 灰置文案；否则 开/关 */
-    private fun islandLabel(): String = when {
-        !FluidCloud.supported -> getString(R.string.setting_island_unsupported)
-        FluidCloud.enabled(this) -> getString(R.string.setting_island_on)
-        else -> getString(R.string.setting_island_off)
     }
 
     // ================= 显示：页面缩放 =================
@@ -242,13 +299,15 @@ class SettingsActivity : Activity() {
             textSize = 26f
             gravity = Gravity.CENTER
             text = "$pageScale%"
+            setTextColor(getColor(R.color.ink))
             setPadding(0, dp(8), 0, dp(4))
         }
+        val accent = getColor(R.color.accent)
         val bar = SeekBar(this).apply {
             max = (MAX_PAGE_SCALE - MIN_PAGE_SCALE) / SCALE_STEP   // 索引 0..20 → 50..150 步长5
             progress = (pageScale - MIN_PAGE_SCALE) / SCALE_STEP
-            progressTintList = android.content.res.ColorStateList.valueOf(0xFF2F6BFF.toInt())
-            thumbTintList = android.content.res.ColorStateList.valueOf(0xFF2F6BFF.toInt())
+            progressTintList = ColorStateList.valueOf(accent)
+            thumbTintList = ColorStateList.valueOf(accent)
             setPadding(dp(24), 0, dp(24), 0)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -313,12 +372,12 @@ class SettingsActivity : Activity() {
                 addView(TextView(this@SettingsActivity).apply {
                     text = label
                     textSize = 16f
-                    setTextColor(0xFF191C23.toInt())
+                    setTextColor(getColor(R.color.ink))
                 })
                 if (sub.isNotEmpty()) addView(TextView(this@SettingsActivity).apply {
                     text = sub
                     textSize = 12f
-                    setTextColor(0xFF737A87.toInt())
+                    setTextColor(getColor(R.color.muted))
                 })
             }
             return LinearLayout(this).apply {
@@ -454,5 +513,8 @@ class SettingsActivity : Activity() {
         const val MIN_PAGE_SCALE = 50
         const val MAX_PAGE_SCALE = 150
         const val SCALE_STEP = 5
+
+        /** 引擎卡片状态点呼吸一轮的时长（§2：2.4s 循环） */
+        const val BREATH_MS = 1200L
     }
 }
