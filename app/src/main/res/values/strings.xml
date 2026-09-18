@@ -14,7 +14,6 @@
     <string name="status_failed">启动失败：%1$s</string>
     <string name="btn_restart">重启</string>
     <string name="btn_back">← 主页</string>
-    <string name="status_preview">预览模式 · 127.0.0.1:%1$d</string>
 
     <!-- 导航栏 + 抽屉（浅色导航改版） -->
     <string name="nav_menu">导航菜单</string>

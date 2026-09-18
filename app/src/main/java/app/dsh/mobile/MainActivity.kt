@@ -9,13 +9,13 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.PathInterpolator
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -45,9 +45,12 @@ import kotlinx.coroutines.launch
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
-    private lateinit var statusBar: TextView
     private lateinit var drawerStatus: TextView
     private var urlLoaded = false
+
+    // —— 引擎就绪前的加载页 ——
+    private lateinit var loading: View
+    private lateinit var loadingStatus: TextView
 
     // —— 抽屉相关：stage 是会被整体「退后」的内容层（导航栏 + 网页 + 进度条）——
     private lateinit var stage: View
@@ -83,8 +86,9 @@ class MainActivity : Activity() {
         }
         setContentView(R.layout.activity_main)
 
-        statusBar = findViewById(R.id.statusBar)
         drawerStatus = findViewById(R.id.drawerStatus)
+        loading = findViewById(R.id.loading)
+        loadingStatus = findViewById(R.id.loadingStatus)
         // 先赋值字段再配置：setupWebView 内部读取的是 this.webView，
         // 若写在 apply{} 里会在赋值完成前执行而触发 UninitializedPropertyAccessException。
         webView = findViewById<WebView>(R.id.webView)
@@ -177,6 +181,13 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (view == null) return
+                // 引擎页首帧渲染完成 → 收起加载页（about:blank 之类的空导航不算，
+                // 所以要求 urlLoaded 已置位且地址是回环页）
+                if (urlLoaded && url != null &&
+                    (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost"))
+                ) {
+                    setLoading(false)
+                }
                 // 桌面模式：视口改写为固定 1280px（响应式走桌面分支，侧栏完整展开）。
                 if (desktopMode) {
                     view.evaluateJavascript(DESKTOP_VIEWPORT_JS, null)
@@ -194,6 +205,16 @@ class MainActivity : Activity() {
                 super.doUpdateVisitedHistory(view, url, isReload)
                 updatePreviewChrome(url)
             }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?,
+            ) {
+                super.onReceivedError(view, request, error)
+                // 主文档加载失败也得把加载页收起来，否则会一直停在转圈上
+                if (request?.isForMainFrame == true) setLoading(false)
+            }
         }
     }
 
@@ -208,7 +229,6 @@ class MainActivity : Activity() {
         val enginePort = (application as DshApp).supervisor.healthyPort
         val preview = loopback && uri.port != enginePort
         findViewById<View>(R.id.btnBack).visibility = if (preview) View.VISIBLE else View.GONE
-        if (preview) statusBar.text = getString(R.string.status_preview, uri.port)
     }
 
     /** 统一的回环页加载入口：缩放统一由 onPageFinished 的 viewport meta 接管，这里只导航。 */
@@ -304,12 +324,24 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 命中哪个菜单项就执行哪个动作（用 getHitRect 判定，省掉给每一项加 clickable） */
+    /**
+     * 命中哪个菜单项就执行哪个动作（省掉给每一项加 clickable）。
+     *
+     * 坐标坑（这就是"菜单点了没反应"的原因）：菜单项挂在「菜单容器」下、容器还有内边距，
+     * getHitRect() 给的是**相对各自父容器**的坐标（y 从 10dp 起），而触摸事件的 x/y 是
+     * **相对抽屉**的坐标（y 要从抽屉头约 150dp 起算）—— 两套坐标系差了一个抽屉头的高度，
+     * 永远比不中。统一用 getLocationInWindow() 换算到窗口坐标再比。
+     */
     private fun handleDrawerItem(x: Float, y: Float) {
-        val rect = Rect()
+        val drawerLoc = IntArray(2)
+        val itemLoc = IntArray(2)
+        drawer.getLocationInWindow(drawerLoc)
         for ((id, action) in drawerActions) {
-            findViewById<View>(id).getHitRect(rect)
-            if (rect.contains(x.toInt(), y.toInt())) {
+            val item = findViewById<View>(id)
+            item.getLocationInWindow(itemLoc)
+            val left = (itemLoc[0] - drawerLoc[0]).toFloat()
+            val top = (itemLoc[1] - drawerLoc[1]).toFloat()
+            if (x >= left && x < left + item.width && y >= top && y < top + item.height) {
                 action()
                 return
             }
@@ -386,6 +418,23 @@ class MainActivity : Activity() {
             "})()"
     }
 
+    /**
+     * 加载页显隐：显示瞬时生效，收起时淡出 —— 引擎启动完成、网页首帧渲染完成后才"跳转进入"。
+     * 重新盖回去由 render() 负责（引擎侧一旦不就绪就复位 urlLoaded 并把加载页盖回来）。
+     */
+    private fun setLoading(show: Boolean) {
+        if (show) {
+            if (loading.visibility != View.VISIBLE) {
+                loading.animate().cancel()
+                loading.alpha = 1f
+                loading.visibility = View.VISIBLE
+            }
+        } else if (loading.visibility == View.VISIBLE) {
+            loading.animate().alpha(0f).setDuration(LOADING_FADE_MS)
+                .withEndAction { loading.visibility = View.GONE }.start()
+        }
+    }
+
     /** 解压进度：null=不在解压（不确定转圈），有值=真实百分比确定性进度 */
     private fun renderProgress(frac: Float?) {
         val bar = findViewById<ProgressBar>(R.id.installProgress)
@@ -398,6 +447,12 @@ class MainActivity : Activity() {
     }
 
     private fun render(state: EngineSupervisor.State) {
+        // 引擎侧还没就绪 → 把加载页盖回来，并复位 urlLoaded：
+        // 等重新就绪时 Healthy 分支会再加载一次引擎页，加载完成由 onPageFinished 收起加载页。
+        if (state !is EngineSupervisor.State.Healthy && state !is EngineSupervisor.State.SafeMode) {
+            urlLoaded = false
+            setLoading(true)
+        }
         val bar = findViewById<ProgressBar>(R.id.installProgress)
         bar.visibility =
             if (state is EngineSupervisor.State.Installing || state is EngineSupervisor.State.Starting)
@@ -431,8 +486,8 @@ class MainActivity : Activity() {
                 getString(R.string.status_idle)
             }
         }
-        statusBar.text = text
         drawerStatus.text = text
+        loadingStatus.text = text
     }
 
     override fun onBackPressed() {
@@ -488,6 +543,9 @@ class MainActivity : Activity() {
         private const val RECEDE_SCALE = 0.88f
         private const val STAGE_SHIFT_RATIO = 0.06f
         private const val SCRIM_ALPHA = 0.28f
+
+        /** 加载页淡出时长（引擎就绪 + 网页首帧渲染完成之后） */
+        private const val LOADING_FADE_MS = 320L
 
         /** 手指位移小于此值视为点击；松手时展开超过 35% 就吸附到打开 */
         private const val DRAG_SLOP = 12f
