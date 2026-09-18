@@ -843,6 +843,12 @@
 - **怎么验（已实测）**：点「退出」后第 11 秒 —— App 进程消失、岛通知 0 条、
   3180 无监听、服务记录 0；logcat：
   `engine stopped; killing app process (user asked for full exit)` → `Quit itself, Pid:...`。
+- **v1.2.32 补充**：退出时连「最近任务」里的卡片也一并撤掉（用户要求"别留空壳卡片"）——
+  杀进程之前调 `ActivityManager.appTasks` 的 `AppTask.finishAndRemoveTask()`：
+  这是**系统侧**请求，不需要界面进程还活着，也不要求用户当时正停在 App 界面上
+  （从通知栏点退出时界面在后台）；撤不掉也不影响退出。
+  实测：退出前 `dumpsys activity recents | grep -c app.dsh.mobile.dev` = 10 行（卡片在），
+  退出后 = **0**，日志 `removing 1 task(s) from recents`。
 
 ### 附：本轮实测出来的验证配方（下次直接用）
 

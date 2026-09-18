@@ -1,5 +1,6 @@
 package app.dsh.mobile.service
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -303,6 +304,22 @@ class EngineService : Service() {
     }
 
     /**
+     * 把本 App 在「最近任务」里的卡片也撤掉（v1.2.32，用户要求：退出就是退出，别留空壳卡片）。
+     *
+     * 用 `ActivityManager.appTasks` + `AppTask.finishAndRemoveTask()`：这是**系统侧**的请求，
+     * 既不需要界面进程还活着，也不要求用户当时正停在 App 界面上
+     * （从通知栏点「退出」时界面通常在后台）。
+     * 失败也不影响退出本身（撤不掉卡片也得把进程杀掉）。
+     */
+    private fun removeTaskFromRecents() {
+        runCatching {
+            val tasks = getSystemService(ActivityManager::class.java).appTasks
+            Log.i(TAG, "removing ${tasks.size} task(s) from recents")
+            tasks.forEach { it.finishAndRemoveTask() }
+        }.onFailure { Log.w(TAG, "remove task from recents failed: ${it.message}") }
+    }
+
+    /**
      * 彻底退出：停引擎 → 移除通知 → 停服务 → **连 App 进程一起杀掉**（v1.2.31 用户要求）。
      *
      * 用户原话：点「退出」要的是"退出 App"，而不是只把引擎停掉、App 还挂在后台。
@@ -330,6 +347,8 @@ class EngineService : Service() {
         app.supervisor.onShutdownFinished(app.appScope) {
             // 期间用户又把 App 打开（监督器重新在跑）= 改主意了 → 不杀
             if (!app.supervisor.running) {
+                // 连"最近任务"里的卡片也撤掉：用户要求退出就是退出，不留空壳卡片
+                removeTaskFromRecents()
                 Log.i(TAG, "engine stopped; killing app process (user asked for full exit)")
                 Process.killProcess(Process.myPid())
             }
