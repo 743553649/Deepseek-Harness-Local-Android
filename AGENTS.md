@@ -25,6 +25,11 @@
 
 ## 硬约束（碰了会坏）
 
+- **界面里重启引擎只能用 `supervisor.restartAsync()`。**
+  `restart()` 是同步的：它内部的 `EngineProcess.stop()` 要等引擎优雅退出（最长 10 秒），
+  从主线程调 = 整屏卡死 5~10 秒（v1.2.36 之前就是这样，用户实测报障）。
+  详见 `docs/PITFALLS.md` J1。
+
 - **`targetSdk = 28` 是刻意的，不要"顺手升级"。**
   sideload 分发，豁免 Android 10+ 的 W^X 限制，才能对 `filesDir` 内的 bionic 二进制 `execve`（Termux 同款策略）。
 
@@ -72,7 +77,9 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 - **分支推送不触发 CI**（workflow 只认 `main` 与 tag）：改代码走分支时用 `workflow_dispatch`
   指定 `ref` 手动触发；**必须用 node 的 fetch 调 GitHub API，别用本机 `curl`**（封装会弄坏
   Authorization 头，返回 401 Bad credentials）。token 在 `$DSH_HOME/.git-credentials`，别回显。
-- 拉产物：`node $DSH_HOME/tmp/dl-resume.js <run_id>`（断点续传；403 = 签名地址过期会自动换新）。
+- 拉产物：**整包重下 + 核对 digest**，别用按字节续传的老脚本（实测会把包拼坏，
+  `unzip` 报 bad CRC、解的 APK 少两万字节 —— 见 `docs/PITFALLS.md` J4）。
+  本机现成脚本：`node $DSH_HOME/tmp/dl-full.cjs <run_id> <输出路径>`（每次从头下 + 校验 sha256）。
   118MB 直连在弱网下会反复断，可改用加速站下 Release 附件（详见 `docs/PITFALLS.md` F3）。
 
 ---
@@ -141,9 +148,11 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 
 - **`docs/ARCHITECTURE.md`** —— 导航：引擎启动链路、目录布局、端口分配、**关键文件职责表**、
   四条数据流（含流体云上报）、CI 流水线、与上游的差异清单（改前先查这里找「该改哪个文件」）
-- **`docs/PITFALLS.md`** —— 踩坑记录（A~I 节，格式：现象 → 根因 → 修法 → 验证）；
-  **I 节 = v1.2.30~v1.2.32 修掉的 I1~I6（含根因）+ 折叠/展开的字段对照表 + 真机验证配方**
-- **`docs/UI-REDESIGN.md`** —— 界面改版设计文档（底部玻璃岛导航替换左侧抽屉 + 液态玻璃视觉 +
-  **把引擎网页装进 App 的注意事项**）。改界面（`activity_main.xml` / `MainActivity` 导航部分 /
-  设置页 / 扩展中心）之前先读这份
+- **`docs/PITFALLS.md`** —— 踩坑记录（A~J 节，格式：现象 → 根因 → 修法 → 验证）；
+  **I 节 = v1.2.30~v1.2.32 修掉的 I1~I6**；**J 节 = 界面改版踩的坑（界面线程停引擎卡死 /
+  设计前提翻车 / 玻璃按钮隐身 / 产物续传损坏）**
+- **`docs/UI-REDESIGN.md`** —— 界面改版设计文档（底部玻璃导航替换左侧抽屉 + 液态玻璃视觉 +
+  **把引擎网页装进 App 的注意事项**）。⚠️ 前面几节是当初的定稿，**最终形态看 §9**
+  （四格导航、底栏铺满、四页合一、以及 4 条改界面的硬约束）。
+  改界面（`activity_main.xml` / `MainActivity` 导航部分 / `SettingsPage` / `ExtensionPage`）之前先读这份
 - `README.md` / `README_EN.md` —— 面向用户的产品说明

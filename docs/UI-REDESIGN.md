@@ -1,19 +1,21 @@
 # UI 改版设计文档 · 液态玻璃 + 底部导航
 
-> **状态**：设计已定稿，等待实现（本文件不是实现计划，是实现依据）
+> **状态**：**已实现并真机验证**（v1.2.36 ~ v1.2.41）。⚠️ 实现过程中用户又改了几处设计，
+> 最终形态与本文的「定稿」有差异 —— **以 §9 为准**，前面各节保留的是当初的设计思路与依据。
 > **适用仓库**：`Deepseek-Harness-Local-Android`（DSH Mobile Dev，共存版 fork）
-> **覆盖范围**：主界面导航结构改版 + 设置页 / 扩展中心视觉重做
+> **覆盖范围**：主界面导航结构改版 + 设置页 / 扩展中心 / 关于页视觉重做
 
 ---
 
 ## 0. 一分钟上手（给新窗口的 Agent）
 
-要做四件事：
+要做四件事（**四件都已完成，见 §9**）：
 
-1. **删掉左侧抽屉和顶部汉堡导航栏**（`activity_main.xml` 里的 `navbar` / `drawer` / `scrim` 三块 + `MainActivity` 里全套抽屉逻辑）。
-2. **加一个底部悬浮玻璃岛导航**：三个目的地 —— 对话 / 扩展 / 设置。
-3. **「引擎信息」和「关于」并进设置页**：设置页顶部放一张引擎卡片（状态 / 地址 / 版本 / 重启引擎），底部放关于。
-4. **设置页和扩展中心按液态玻璃重做**（玻璃面板、玻璃开关、玻璃按钮）。
+1. ✅ **删掉左侧抽屉和顶部汉堡导航栏**（`activity_main.xml` 里的 `navbar` / `drawer` / `scrim` 三块 + `MainActivity` 里全套抽屉逻辑）。
+2. ✅ **加一个底部导航**：三个目的地 —— 对话 / 扩展 / 设置（**最终是四个**，多了「关于」，且玻璃条铺满底栏）。
+3. ✅ **「引擎信息」并进设置页**：设置页顶部一张引擎卡片（状态 / 地址 / 版本 / 重启引擎）。
+   「关于」最终**没有并进设置页**，而是单独占底栏第四格（用户要求）。
+4. ✅ **设置页、扩展中心和关于页按液态玻璃重做**（玻璃面板、玻璃开关、玻璃按钮）。
 
 **设计参考实现（先看这个，再动手）**：
 
@@ -119,7 +121,11 @@ cd /data/user/0/app.dsh.mobile/files/dsh-home/work/dsh-mobile-ui && node serve.j
 
 ## 3. Android 端怎么画（逐项）
 
-### 3.1 玻璃岛 `bg_glass_island.xml`
+### 3.1 玻璃条 `bg_glass_bar.xml`（初版叫 `bg_glass_island.xml`，v1.2.40 已删）
+
+> v1.2.40 起底栏铺满、不留边距、直角，所以下面这份「圆形悬浮岛」的 layer-list
+> 只保留作参考；实际文件 `bg_glass_bar.xml` 是「竖渐变 + 顶沿 1dp 高光」，
+> 且透明度更高（44%→24%）。
 
 ```xml
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
@@ -243,7 +249,11 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 `EngineService` 的前台通知、退出顺序、`START_NOT_STICKY` 等（`AGENTS.md` 与 `docs/PITFALLS.md` I 节）。这次改版**完全不需要动 `EngineService`**，如果发现"非动不可"，先停下来核对 §I1~I6。
 
-### 4.10 别删 AboutActivity，先留着
+### 4.10 ~~别删 AboutActivity，先留着~~（已在 v1.2.39 删除）
+
+> 后续变化：「关于」后来没并进设置页，而是单独占底栏第四格 —— 于是
+> `AboutActivity.kt` + `activity_about.xml` 被 `AboutPage.kt` + `view_about.xml` 取代，
+> v1.2.39 连同 Manifest 条目一起删掉了。下面是当初的取舍记录。
 
 「关于」并进设置页后，`AboutActivity` 与 `activity_about.xml` 就成了没入口的死代码。**第 1 步不要删**——删 Activity 要动 Manifest，一次改动别做两件事。确认新版跑通后再单独清理。
 
@@ -265,18 +275,21 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 ## 6. 要改的文件
 
+> ⚠️ 本表是**开工前的改动计划**。文件后来有增删（多个 Activity 被删、页面拆成 include），
+> **最终文件清单以 §9.3 为准**；这里的行内批注只标了最容易被误导的那几处。
+
 | 文件 | 动作 |
 |---|---|
 | `app/src/main/res/layout/activity_main.xml` | 删 `navbar`（含 `btnMenu`/`statusBar`/`btnBack`）、`drawer`、`scrim`；加底部玻璃岛；`loading` 覆盖层保留 |
 | `app/src/main/java/app/dsh/mobile/MainActivity.kt` | 删抽屉全套：`setupDrawer`(241) `drawerWidth`(257) `setDrawerOpen`(260) `renderDrawer`(276) `setupDrawerTouch`(294) `handleDrawerItem`(335) `drawerActions`(351) 及相关字段/常量；`onResume` 里 `drawerProgress` 那句(130)一并去掉；`btnBack` 逻辑挪到新胶囊 |
-| `app/src/main/res/layout/activity_settings.xml` | 整页重做：引擎卡片 → 显示 → 权限中心 → 关于 |
-| `app/src/main/java/app/dsh/mobile/SettingsActivity.kt` | 接引擎信息（状态/地址/版本）+ 重启引擎 + 关于区块 |
-| `app/src/main/res/layout/activity_extension_store.xml` | 列表包进玻璃面板；**行本身是代码拼的**（`ExtensionStoreActivity` 里 `LinearLayout` 手搓，没有 item 布局 XML） |
-| `app/src/main/java/app/dsh/mobile/ExtensionStoreActivity.kt` | 行样式改玻璃风；**保留现有图标做法**（见下） |
+| `app/src/main/res/layout/activity_settings.xml` | 整页重做：引擎卡片 → 显示 → 权限中心 → 关于（**该文件与下面的 Activity 已在 v1.2.36 删除**，现在是 `view_settings.xml` + `SettingsPage.kt`，见 §9） |
+| `app/src/main/java/app/dsh/mobile/SettingsActivity.kt` | 接引擎信息（状态/地址/版本）+ 重启引擎 + 关于区块（已删除 → `SettingsPage.kt`） |
+| `app/src/main/res/layout/activity_extension_store.xml` | 列表包进玻璃面板；**行本身是代码拼的**（**已删除** → `view_extensions.xml` + `ExtensionPage.kt`） |
+| `app/src/main/java/app/dsh/mobile/ExtensionStoreActivity.kt` | 行样式改玻璃风；**保留现有图标做法**（见下）（已删除 → `ExtensionPage.kt`） |
 
 ### 6.1 扩展图标不要改掉
 
-`ExtensionStoreActivity.kt:133-147` 现在的做法是：从 `catalog.json` 的 `iconRes` 取 17 个官方品牌矢量图
+`ExtensionPage.kt`（原 `ExtensionStoreActivity.kt:133-147`）现在的做法是：从 `catalog.json` 的 `iconRes` 取 17 个官方品牌矢量图
 （Python / Git / Rust…），统一 `SRC_IN` 染成白色剪影，垫在一块 `bg_icon_chip` 上，chip 颜色由
 `categoryColor(ext.category)` 按分类给色。
 
@@ -293,13 +306,13 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 | `res/layout/activity_settings.xml`（4 处） | 本次重做 |
 | `res/layout/activity_onboarding.xml`（3 处）+ `OnboardingActivity.kt:161` | 首次引导页，**不在本次范围**，但主色变了会显得不一致 —— 建议本次一起换色（只换色，不改排版） |
 | `res/layout/activity_about.xml`（1 处）+ `res/drawable/bg_btn_accent.xml`（1 处） | 关于页 / 强调按钮底 |
-| `SettingsActivity.kt:250-251` | 给进度条/滑块上色的两行，**必须改**，否则设置页里会跳出旧蓝 |
-| `ExtensionStoreActivity.kt`（3 处） | 下载进度条 + 文字色等 |
+| `SettingsPage.kt`（原 `SettingsActivity.kt:250-251`） | 给进度条/滑块上色的两行，**必须改**，否则设置页里会跳出旧蓝 |
+| `ExtensionPage.kt`（原 `ExtensionStoreActivity.kt`，3 处） | 下载进度条 + 文字色等 |
 | `engine/AgentBridge.kt:234` | ⚠️ **这不是 App 界面**，是桥接服务返回的一张 HTML 诊断页的样式。**本次不要动**，要改也是单独一次 |
 
 建议：先建 `res/values/colors.xml` 把 §2 的颜色落成资源，再把上面这些**受影响的位置**换成引用。
 不要在本次顺手重构所有硬编码颜色 —— 范围会失控。
-| `app/src/main/res/drawable/` | 新增 `bg_glass_island.xml` `bg_glass_card.xml` `bg_nav_pill.xml` `bg_switch_track.xml` `ic_nav_chat.xml` `ic_nav_ext.xml` `ic_nav_settings.xml` `bg_glass_pill.xml`；旧的 `bg_drawer.xml` `ic_menu.xml` 变成死文件（可留可删） |
+| `app/src/main/res/drawable/` | 新增 `bg_glass_island.xml`（**后被 `bg_glass_bar.xml` 取代**）`bg_glass_card.xml` `bg_nav_pill.xml` `bg_switch_track.xml`（**实际没建：开关是代码自绘的**，见 `GlassSwitch.kt`）`ic_nav_chat.xml` `ic_nav_ext.xml` `ic_nav_settings.xml`（+ 后加的 `ic_nav_about.xml`）`bg_glass_pill.xml` `bg_glass_hero.xml` `bg_page.xml`；旧的 `bg_drawer.xml` `ic_menu.xml` 变成死文件（留着没删） |
 | `app/src/main/res/values/colors.xml` | **新建**：把 §2 的颜色落成资源 |
 | `app/src/main/res/values/themes.xml` | `statusBarColor` / `navigationBarColor` / `windowBackground` → `#FFF5F7FB` |
 | `app/src/main/res/values/strings.xml` | 新增底栏三项、设置页分组、引擎卡片文案；旧的 `nav_menu` / `drawer_*` 系列可删 |
@@ -308,20 +321,22 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 ## 7. 验证清单（别只看编译过）
 
-**先推 main 走 CI**（约 2-3 分钟），拉产物装机，然后**逐项肉眼确认**：
+**先推 main 走 CI**（约 2-3 分钟），拉产物装机，然后**逐项确认**（下为 v1.2.41 的实测结果）：
 
-- [ ] 对话页：底栏和输入框之间**没有多余的横线**；留白区是白的，不是灰的
-- [ ] 底栏和输入框之间**不重叠**，发送键点得到
-- [ ] 三个格子点击正确（对话 / 扩展 / 设置），药丸滑动到位
-- [ ] 没有抽屉了：左边缘横滑、点原来的汉堡位置，都不该有东西出来
-- [ ] 返回键行为不变（`ARCHITECTURE.md`：返回键 = 退到后台，不停引擎）
-- [ ] 引擎未就绪时（可临时改端口制造）：对话页顶部胶囊能说明原因，不是一片空白
-- [ ] 设置页：引擎状态 / 地址 / 版本正确，重启引擎能用
-- [ ] 扩展中心：三种状态的颜色对，下载 / 激活 / 停用按钮能用
-- [ ] 横屏 + 桌面布局下底栏不歪、不顶到内容
-- [ ] 系统开了「减少动态效果」时没有动画
-- [ ] 深色模式仍是关闭状态（系统反相没生效）
-- [ ] `aapt2 dump badging`：包名仍是 `app.dsh.mobile.dev`（别装错成官方版）
+- [x] 对话页：底栏和输入框之间没有多余的横线；底栏是白的，和白色网页连成一片（像素实测底栏区 `#ffffff`）
+- [x] 底栏和输入框之间**不重叠**，发送键点得到（WebView 用 weight 自己变矮，不是同层叠加）
+- [x] 四个格子点击正确、药丸滑动到位（对话 / 扩展 / 设置 / 关于）
+- [x] 没有抽屉了：左边缘横滑、点原来的汉堡位置都没有东西出来（dex 里已无 `setupDrawer` / `drawerItem*`）
+- [x] 返回键：非对话页 = 回对话页；对话页 = 退到后台，不停引擎（用户已确认）
+- [x] 引擎未就绪时：启动画面盖住对话页，**底栏此时完全不出现**（像素实测底栏区无任何图标/药丸），
+      加载完成后底栏与页面一起淡入
+- [x] 设置页：引擎状态 / 地址 / 版本正确，重启引擎能用（且不再卡死，见 PITFALLS J1）
+- [x] 扩展中心：三种状态颜色对，下载 / 激活 / 停用按钮都能用（激活/停用不再卡界面）
+- [x] 切页过渡：不闪（用户已确认）
+- [ ] 横屏 + 桌面布局下底栏不歪、不顶到内容 —— **待验**（这轮没测横屏）
+- [ ] 系统开了「减少动态效果」时没有动画 —— 代码里已按 `ANIMATOR_DURATION_SCALE == 0` 短路，**未真机验**
+- [x] 深色模式仍是关闭状态（`forceDarkAllowed=false` 未动）
+- [x] `aapt2 dump badging`：包名仍是 `app.dsh.mobile.dev`
 
 **视觉类结论只能由用户判断**（Agent 读不了图）：岛的大小、玻璃的观感、颜色对不对，必须请他确认，不能替他下结论。
 
@@ -335,14 +350,82 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 | 设置/扩展页的真模糊 | **降级为观感玻璃**（见 4.3）。真模糊留作以后的可选增强 |
 | 引擎异常状态怎么让用户看见 | 待实现（4.5 给了建议方案） |
 | 预览返回按钮的新位置 | 待实现（4.6 给了建议方案） |
-| 横屏时岛宽 | 待定（4.7 给了建议：按屏宽 34%） |
-| `AboutActivity` 死代码清理 | 第 2 步做 |
-| 底栏常驻 | 第 2 步做 |
+| 横屏时岛宽 | **已作废**：底栏改成铺满整宽，不存在"岛宽"问题（§9） |
+| `AboutActivity` 死代码清理 | **已做**（v1.2.39 删除；「关于」改成底栏第四格） |
+| 底栏常驻 | **已做**（v1.2.36 四页合一 + 切页过渡动画） |
+
+
+---
+
+## 9. 实际落地（v1.2.36 ~ v1.2.41）与定稿的差异
+
+> 实现过程中用户看了真机效果后又改了几处设计。**本节是最终形态的唯一依据**；
+> 前面各节保留的是当初的设计理由，凡与本节冲突的，以本节为准。
+
+### 9.1 最终形态
+
+```
+┌──────────────────────────────────┐
+│  WebView（引擎对话网页，全屏）      │
+│                                  │
+│  …对话内容…                       │
+│  ┌────────────────────────────┐  │
+│  │ 输入框              [发送]  │  │
+│  └────────────────────────────┘  │
+│   对话    扩展    设置    关于     │  ← 64dp 玻璃条：铺满整宽、直角、无投影
+└──────────────────────────────────┘
+```
+
+四个页面都在 **MainActivity 内**（底栏常驻、切页只换可见性）：
+
+| 页面 | 内容 | 实现 |
+|---|---|---|
+| 对话 | 纯 WebView（不放任何 App 元素，只有引擎未就绪时顶部那枚胶囊） | `activity_main.xml` 的 `chatPage` |
+| 扩展 | 扩展列表，按分类各包一块玻璃面板 | `view_extensions.xml` + `ExtensionPage.kt` |
+| 设置 | 引擎卡片（主角）→ 显示 → 权限中心 | `view_settings.xml` + `SettingsPage.kt` |
+| 关于 | 项目信息 / 版本 / 开源地址 | `view_about.xml` + `AboutPage.kt` |
+
+### 9.2 与定稿的逐条差异
+
+| # | 定稿（§1~§8） | 最终 | 为什么改 |
+|---|---|---|---|
+| 1 | 三格导航，「关于」并进设置页 | **四格**，「关于」单独一格 | 用户要求，且底栏铺满后格子少了显空 |
+| 2 | 174×45dp 悬浮玻璃岛（圆角 24dp + elevation 12dp） | **铺满整宽、直角、无投影、64dp 高**的玻璃条 | 用户：悬浮岛旁边一大片底色"很突兀" —— 铺满之后就没有"旁边"了 |
+| 3 | 留白区涂纯白与网页"连成一片"（§4.2） | 对话页**保留纯白垫色**；其它页透明（露出页面渐变） | 用户要求"把会话界面的底栏渲染成白色"；其它页配渐变才看得出玻璃材质 |
+| 4 | 玻璃白渐变 72%→54% | **44%→24%** | 用户：透明一点才看得出是液态玻璃 |
+| 5 | 选中态 = 39dp 深色药丸 | 居中**胶囊**（上下各留 12dp、左右各留 8dp） | 用户：那块黑东西贴着屏幕左下/右下角"割裂感很强" |
+| 6 | 启动时底栏立即可见 | **启动画面期间不显示**，加载完成后与页面一起淡入（260ms） | 用户：底栏出现时机不对 |
+| 7 | 第 1 步先独立 Activity、底栏常驻留给第 2 步 | **两步一起做**（v1.2.36） | 用户：独立页面之间是"硬切"，要求直接做常驻 |
+| 8 | —（没提过渡） | 切页**交叉淡入淡出 + 屏宽 6% 横向位移**（260ms） | 用户要求加动画（已确认不闪） |
+| 9 | —（v1.2.38 试过"运行时取网页底色"） | **已废弃**，改成按页面固定垫色 | 取网页底色对"白 vs 蓝"的观感没帮助，代码还多一层耦合 |
+
+### 9.3 文件增删（相对 §6）
+
+**新增**
+
+- 页面：`res/layout/view_settings.xml` / `view_extensions.xml` / `view_about.xml`（由 `activity_main.xml` include）
+- 逻辑：`SettingsPage.kt` / `ExtensionPage.kt` / `AboutPage.kt` / `GlassSwitch.kt`（自绘玻璃开关）/ `Motion.kt`（「减少动态效果」判定的唯一入口）
+- drawable：`bg_glass_bar.xml`（底栏玻璃）、`bg_glass_card.xml`、`bg_glass_hero.xml`（引擎卡片）、`bg_glass_pill.xml`（顶部胶囊）、`bg_nav_pill.xml`（选中态胶囊）、`bg_page.xml`（页面渐变 + 三团光晕）、`ic_nav_chat/ext/settings/about.xml`
+- `res/values/colors.xml`（§2 的设计令牌收口）
+
+**删除**
+
+- `SettingsActivity.kt` / `ExtensionStoreActivity.kt`（v1.2.36）、`AboutActivity.kt`（v1.2.39）+ 各自的 layout + Manifest 条目
+- `bg_glass_island.xml`（v1.2.40，被 `bg_glass_bar.xml` 取代）
+- 抽屉遗留：`bg_drawer.xml`、`ic_menu.xml`（死文件，留着没删）
+
+### 9.4 以后再改界面，这四条是硬约束
+
+1. **底栏绝不能盖住网页输入框**：竖向 LinearLayout 里 WebView `weight=1` 自己变矮；不叠层、不给 WebView 设 `paddingBottom`、不往引擎网页注入 CSS/JS（§4.2）。
+2. **界面里重启引擎只能用 `supervisor.restartAsync()`**：`restart()` 是同步的，会在主线程等引擎退出 5~10 秒（`docs/PITFALLS.md` J1）。
+3. **玻璃开关别用 `Switch` / `SwitchCompat`**：仓库没有 Material 依赖，样式改不动 —— 用 `GlassSwitch`（§3.4）。
+4. **所有动画先过 `Motion.reduced(this)`**：系统开了「减少动态效果」就全部短路成终态（§2）。
 
 ---
 
 ## 附：相关文档
 
 - `docs/ARCHITECTURE.md` —— 引擎启动链路、WebUI 会话认证（token）、关键文件职责表
-- `docs/PITFALLS.md` —— 踩坑记录（A~I 节），改通知/引擎相关代码前必读 I 节
+- `docs/PITFALLS.md` —— 踩坑记录（A~J 节）。改通知/引擎相关代码前必读 I 节；
+  **改界面/切页/底栏前必读 J 节**（界面线程停引擎、设计前提翻车、玻璃按钮隐身、产物下载损坏）
 - 仓库根 `AGENTS.md` —— 硬约束（`targetSdk=28` 不可动）、开发循环、验证纪律

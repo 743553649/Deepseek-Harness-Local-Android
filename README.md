@@ -137,7 +137,8 @@ gradle assembleDebug -Pabi=arm64-v8a
 |---|---|---|
 | **本文件** | 使用者 | 产品说明、安装、FAQ |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 改代码的人 / Agent | 代码导航：哪个文件负责什么、引擎启动链路、端口与目录布局、四条数据流（含流体云上报）、CI 流水线、与上游的差异清单 |
-| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 改代码的人 / Agent | 踩坑记录（A~I 节，全部按「现象 → 根因 → 修法 → 验证」写）+ 折叠/展开字段对照表 + 真机验证配方 |
+| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 改代码的人 / Agent | 踩坑记录（A~J 节，全部按「现象 → 根因 → 修法 → 验证」写）+ 折叠/展开字段对照表 + 真机验证配方 |
+| [`docs/UI-REDESIGN.md`](docs/UI-REDESIGN.md) | 改界面的人 / Agent | 界面设计：底部玻璃导航 + 液态玻璃令牌 + **把引擎网页装进 App 的注意事项**；最终形态看 §9 |
 | [`AGENTS.md`](AGENTS.md) | AI Agent | 仓库入口：硬约束、验证纪律、协作约定 |
 
 ## 反馈

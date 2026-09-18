@@ -137,9 +137,12 @@ scripts/
 | 文件 | 行数 | 职责 | 什么时候会改它 |
 |---|---|---|---|
 | `engine/ExtensionManager.kt` | 767 | 扩展中心：Termux 仓库实时安装（索引 → 依赖闭包 → .deb → 解包 → 原子发布） | 改扩展机制 |
-| `SettingsActivity.kt` | 458 | 设置页（权限模式 / 显示 / **流体云开关** / 扩展入口） | 加设置项 |
-| `MainActivity.kt` | 397 | WebView 外壳 + 状态条 + 预览模式；Healthy 后用 `state.webUrl`（带 token）加载；**返回键 = `moveTaskToBack`（只退到后台，不停引擎）** | 改主界面 |
-| `ExtensionStoreActivity.kt` | 390 | 扩展中心 UI | 改扩展 UI |
+| `MainActivity.kt` | 700 | **主界面 = 四页合一的容器**：WebView 外壳 + 底栏玻璃导航（对话/扩展/设置/关于）+ 顶部状态胶囊 + 加载页时机；Healthy 后用 `state.webUrl`（带 token）加载；**返回键：非对话页 = 回对话页，对话页 = `moveTaskToBack`（只退到后台，不停引擎）** | 改主界面 / 导航 |
+| `SettingsPage.kt` | 470 | 设置页逻辑（引擎卡片 / 显示 / 权限模式 / 无障碍）；**重启引擎走 `supervisor.restartAsync()`** | 加设置项 |
+| `ExtensionPage.kt` | 395 | 扩展中心 UI（列表行是代码拼的，**保留官方品牌图标做法**） | 改扩展 UI |
+| `AboutPage.kt` | 35 | 关于页（项目信息 / 版本 / 开源地址） | 改关于页 |
+| `GlassSwitch.kt` | 128 | 自绘玻璃开关（仓库无 Material 依赖，系统 Switch 样式改不动） | 改开关外观/动效 |
+| `Motion.kt` | 21 | 「减少动态效果」（`ANIMATOR_DURATION_SCALE == 0`）判定的唯一入口，所有动画先过它 | 加动画时 |
 | `engine/EngineConfig.kt` | 445 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入**（含 `island` 命令、**流体云插件与补丁层**；插件源码在 `assets/fluid-cloud.mjs`，启动时复制并替换端口占位符） | 改端口 / 环境变量 / 注入脚本 |
 | `engine/AgentBridge.kt` | 408 | 环回 HTTP：通知 / 读屏 / 点击 / **`/island`（流体云三层上报）** / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
 | `engine/EngineSupervisor.kt` | 572 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启；**异步停止 / 停引擎收尾跑完才 spawn（pendingShutdown）/ 监督代际 epoch / 只按本轮日志判 EADDRINUSE** | 改启动/自愈逻辑 |

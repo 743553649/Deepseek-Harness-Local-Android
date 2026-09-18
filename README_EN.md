@@ -127,7 +127,8 @@ Alternatively, fork the repo and run the **android-build** workflow on GitHub Ac
 |---|---|---|
 | **This file** | Users | Product overview, install, FAQ |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Contributors / agents | Code map: what each file owns, engine startup chain, ports and directories, the four data flows (incl. the fluid-cloud island), CI pipeline, diff vs upstream |
-| [`docs/PITFALLS.md`](docs/PITFALLS.md) | Contributors / agents | Pitfall log (sections A~I, each as symptom → root cause → fix → verification) plus real-device verification recipes |
+| [`docs/PITFALLS.md`](docs/PITFALLS.md) | Contributors / agents | Pitfall log (sections A~J, each as symptom → root cause → fix → verification) plus real-device verification recipes |
+| [`docs/UI-REDESIGN.md`](docs/UI-REDESIGN.md) | Contributors / agents | UI design: bottom glass navigation, liquid-glass tokens, and **what to watch out for when embedding the engine WebUI**; the shipped form is in §9 |
 | [`AGENTS.md`](AGENTS.md) | AI agents | Repo entry point: hard constraints, verification discipline, collaboration rules |
 
 ## Feedback
