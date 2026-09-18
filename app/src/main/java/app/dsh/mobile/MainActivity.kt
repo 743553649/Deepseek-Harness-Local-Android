@@ -9,18 +9,19 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Color
 import android.graphics.PorterDuff
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.PathInterpolator
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ImageView
-import android.widget.ProgressBar
 import android.widget.TextView
 import app.dsh.mobile.engine.EngineSupervisor
 import app.dsh.mobile.engine.Privilege
@@ -48,9 +49,15 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private var urlLoaded = false
 
+    // —— 全屏（覆盖状态栏）——
+    private lateinit var rootView: View
+    private var statusBarInset = -1
+
     // —— 引擎就绪前的加载页 ——
     private lateinit var loading: View
     private lateinit var loadingStatus: TextView
+    private lateinit var loadingSpinner: GlassSpinner
+    private lateinit var installProgress: GlassProgress
 
     // —— 四个页面（同一时刻只显示一个）——
     private lateinit var chatPage: View
@@ -107,8 +114,11 @@ class MainActivity : Activity() {
         }
         setContentView(R.layout.activity_main)
 
+        rootView = findViewById(R.id.root)
         loading = findViewById(R.id.loading)
         loadingStatus = findViewById(R.id.loadingStatus)
+        loadingSpinner = findViewById(R.id.loadingSpinner)
+        installProgress = findViewById(R.id.installProgress)
         chatPage = findViewById(R.id.chatPage)
         settingsPageView = findViewById(R.id.settingsPage)
         extensionsPageView = findViewById(R.id.extensionsPage)
@@ -132,6 +142,7 @@ class MainActivity : Activity() {
 
         setupNav()
         setupCapsule()
+        setupEdgeToEdge()
         readUiPrefs()
         if (landscapeMode) {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -174,6 +185,48 @@ class MainActivity : Activity() {
             if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         webView.reload()
+    }
+
+    /**
+     * 全屏：窗口延伸到状态栏底下、状态栏底色透明，页面内容整体下移一个状态栏高度。
+     * 效果 = 状态栏那一块显示的是**页面自己的底色**（对话页是白的，其它页是页面渐变），
+     * 同时网页/内容不会被状态栏图标压住。
+     *
+     * 注意：引擎网页能看到的区域和改之前**一样高** —— 窗口多了 ~38dp，内容又下移了同样多。
+     * 顶部胶囊是根节点上的浮层，也要跟着下移。
+     */
+    private fun setupEdgeToEdge() {
+        window.statusBarColor = Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        rootView.setOnApplyWindowInsetsListener { _, insets ->
+            @Suppress("DEPRECATION")
+            val top = insets.systemWindowInsetTop.takeIf { it > 0 } ?: statusBarHeightRes()
+            applyStatusBarInset(top)
+            insets
+        }
+        rootView.requestApplyInsets()
+    }
+
+    /** 状态栏内边距变了（首次布局 / 旋转 / 刘海机型）：把四个页面和顶部胶囊一起下移 */
+    private fun applyStatusBarInset(top: Int) {
+        if (top == statusBarInset) return
+        statusBarInset = top
+        for (page in listOf(chatPage, extensionsPageView, settingsPageView, aboutPageView)) {
+            page.setPadding(0, top, 0, 0)
+        }
+        if (::capsule.isInitialized) {
+            (capsule.layoutParams as ViewGroup.MarginLayoutParams).topMargin = dp(CAPSULE_TOP_DP) + top
+        }
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** 兜底：万一系统不给 inset（HDR/新版本兼容路径），直接读状态栏高度资源 */
+    private fun statusBarHeightRes(): Int {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
     }
 
     private fun setupWebView() {
@@ -537,15 +590,9 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 解压进度：null=不在解压（不确定转圈），有值=真实百分比确定性进度 */
+    /** 解压进度：null = 不确定态（进度条来回扫），有值 = 真实百分比确定性进度 */
     private fun renderProgress(frac: Float?) {
-        val bar = findViewById<ProgressBar>(R.id.installProgress)
-        if (frac == null) {
-            bar.isIndeterminate = true
-        } else {
-            bar.isIndeterminate = false
-            bar.progress = (frac * 10000).toInt()
-        }
+        installProgress.progress = frac
     }
 
     private fun render(state: EngineSupervisor.State) {
@@ -555,10 +602,10 @@ class MainActivity : Activity() {
             urlLoaded = false
             setLoading(true)
         }
-        val bar = findViewById<ProgressBar>(R.id.installProgress)
-        bar.visibility =
-            if (state is EngineSupervisor.State.Installing || state is EngineSupervisor.State.Starting)
-                View.VISIBLE else View.GONE
+        // 转圈和进度条二选一：启动/安装这类"有进度可量"的阶段显示进度条，其余显示转圈
+        val busy = state is EngineSupervisor.State.Installing || state is EngineSupervisor.State.Starting
+        installProgress.visibility = if (busy) View.VISIBLE else View.GONE
+        loadingSpinner.visibility = if (busy) View.GONE else View.VISIBLE
         val text = when (state) {
             is EngineSupervisor.State.Idle -> getString(R.string.status_idle)
             is EngineSupervisor.State.Installing -> getString(R.string.status_installing)
@@ -654,6 +701,9 @@ class MainActivity : Activity() {
 
         /** 启动画面退场后底栏淡入的时长（和页面一起出现，别在加载时就冒出来） */
         private const val BAR_FADE_MS = 260L
+
+        /** 顶部胶囊离状态栏的间距（全屏后由代码加上状态栏高度） */
+        private const val CAPSULE_TOP_DP = 10
 
         /** 切页过渡：260ms 交叉淡入淡出 + 屏宽 6% 的横向位移 */
         private const val PAGE_MS = 260L

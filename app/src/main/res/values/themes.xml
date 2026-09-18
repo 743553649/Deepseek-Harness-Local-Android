@@ -5,13 +5,18 @@
          App 默认开启系统强制暗化，不关掉浅色会被系统反相成深色。
          windowLightStatusBar/windowLightNavigationBar 让系统栏图标在浅底上变深色，
          否则白图标压在浅色底上看不见（低版本系统会忽略这两个属性）。
-         三个底色必须与页面底色（@color/page_top）一致，否则系统栏与页面之间会有一条色差
-         （docs/UI-REDESIGN.md §3.6）。 -->
+         两个底色必须与页面底色（@color/page_top）一致，否则系统栏与页面之间会有一条色差
+         （docs/UI-REDESIGN.md §3.6）。
+         注意：MainActivity（主界面）现在走全屏，会把这个状态栏底色改成 **透明** 并由代码下移内容
+         —— 状态栏那一块显示的是页面自己的底色；引导页不开全屏，用这里的底色。 -->
     <style name="Theme.Dsh" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@color/page_top</item>
         <item name="android:navigationBarColor">@color/page_top</item>
         <item name="android:windowBackground">@color/page_top</item>
         <item name="android:forceDarkAllowed">false</item>
+        <!-- 全屏：允许内容画进刘海/挖孔区域（MainActivity 会把内容整体下移一个状态栏高度）。
+             低版本系统会忽略这一条。 -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
