@@ -706,57 +706,92 @@
 
 ---
 
-## I. 流体云 · 已知未修问题与界面事实（下一轮开工清单）
+## I. 流体云 · v1.2.30 修掉的问题（I1~I3）与界面事实
 
-> 本节记的都是**真机实测确认、但本轮没修**的东西，格式：现象 → 根因（带证据）→ 建议修法 → 怎么验。
-> 上一轮已完成并验证的部分见 H1~H7（那些是"已修"）。
+> 本节原本是「下一轮开工清单」。三项已在 **v1.2.30** 修完并真机验证，现按
+> 「现象 → 根因 → 修法 → 验证」归档，供以后回看。上一轮已修项见 H1~H7。
 
-### I1. ★退出后 ~8 秒内重开 App → 新引擎第一次启动必撞 EADDRINUSE
+### I1. ★退出后 ~8 秒内重开 App → 新引擎被杀 / 撞 EADDRINUSE（v1.2.30 已修）
 
-- **现象**（用户实测）：点通知栏「退出」后立刻打开 App，引擎**第一次启动必失败**（顶部状态显示
-  「进程异常退出…N 秒后自动重启（第 1 次）」），约 3 秒后第二次启动成功。
-- **证据**：`engine.log` 里失败那次是
-  `Error: listen EADDRINUSE: address already in use 127.0.0.1:3180`。
-- **根因**：H3 把「退出」时的停引擎改成**后台异步**（为了修 ANR），而引擎**优雅退出要约 8 秒**
-  （实测 8078ms，它要 flush 会话）。用户在 8 秒窗口内重开 App → 监督器立刻 spawn 新引擎 →
-  旧引擎还占着 3180 → 新引擎启动即死 → 退避 2 秒 → 重试成功。
-  **也就是"修 ANR"换来了这个竞态。**
-- **建议修法**：监督循环在 `spawnEngine()` **之前**先等旧引擎退干净（后台等待，不阻塞主线程）：
-  `stopAsync()` 里把要停的进程存成 `pendingShutdown`，循环里
-  `pendingShutdown?.exitFuture?.get(10, TimeUnit.SECONDS)`（超时就继续，靠已有的 EADDRINUSE 兜底）。
-- **怎么验**：点「退出」→ **3 秒内**重开 App → `engine.log` **不应**再出现 EADDRINUSE；
-  `logcat -b events | grep am_anr` 无记录（不能把 ANR 修回来）。
+- **现象**（用户实测）：点通知栏「退出」后立刻打开 App，顶部显示「进程异常退出…N 秒后自动重启（第 1 次）」，
+  约 3 秒后第二次启动才成功。
+- **根因**（v1.2.30 真机日志对时，比初判深一层）：
+  - 表层：H3 把「退出」时的停引擎改成**后台异步**（为了修 ANR），而引擎优雅退出要几秒，
+    用户在窗口内重开 → 新引擎与旧引擎抢 3180。
+  - **真正的元凶**：`EngineProcess.stop()` 的强杀用的是 `Pty.nativeForceKill()` /
+    `Pty.nativeChildPid()` —— 那是 **PTY「当前子进程」的全局句柄，不是这个进程对象自己的 pid**。
+    实测时间线：老引擎收到 TERM 后约 2 秒就退出、也放开了 3180，但 `stop()` 的等待循环迟迟不返回，
+    一路数到 10 秒超时才发强杀；而 App 早在第 3 秒就重开、新引擎已经起来并**成为"当前子进程"**
+    → 那句强杀（以及 su 的进程组击杀）**打在了新引擎身上**：
+    `engine exited, raw status=0x9`（0x9 = SIGKILL）→ 再拉起又撞端口。
+  - 附带坑①：退出路径会调**两次** `stopAsync`（`exitCompletely()` 一次，紧接着
+    `stopSelf()` → `onDestroy()` 再一次）。第二次调用时 `process` 已经是 null，
+    若无条件覆盖状态就会把第一次刚记下的东西抹掉，等待逻辑直接空转
+    （v1.2.30 开发中踩到：logcat 里连等待日志都没有）。
+  - 附带坑②：**只等 `exitFuture` 不够** —— 它只代表"进程退出"，盖不住 `stop()` 之后的强杀与进程组清理。
+- **修法**：`stopAsync()` 把这次停引擎的**收尾工作**记成 `pendingShutdown: CompletableFuture`，
+  由 `stop()` 返回时（`finally`）兑现；监督循环在 `spawnEngine()` **之前** `get(15s)`
+  （后台等，不阻塞主线程 —— ANR 不能修回来），跑完才允许 spawn 新引擎；
+  超时放行，原有的 EADDRINUSE 兜底处置原样保留。
+- **怎么验（已实测，两轮一致）**：
+  ```bash
+  # 1) 点「退出」（与通知栏按钮同一个入口）
+  am startservice -n app.dsh.mobile.dev/app.dsh.mobile.service.EngineService \
+    -a app.dsh.mobile.service.action.EXIT
+  # 2) 3 秒内重开 App（原来就死在这个窗口）
+  sleep 3 && am start -n app.dsh.mobile.dev/app.dsh.mobile.MainActivity
+  ```
+  - `logcat -d | grep EngineSupervisor` 应出现
+    `previous engine shutdown finished after 6746ms; spawning new one`（第二轮 6901ms）
+  - 本轮新增的 `engine.log` 里 `EADDRINUSE` **0 次**（修前必现）
+  - `logcat -b events | grep am_anr` **0 条**（没有把 ANR 修回来）
+  - 重开后约 18 秒岛变「就绪」（修前是弹「进程异常退出」+ 更久的折腾）
 
-### I2. 自动层 5 秒轮询 → 引擎就绪后岛上可能仍显示「启动中」最多 5 秒
+### I2. 引擎就绪后岛上仍可能显示「启动中」最多 5 秒（v1.2.30 已修）
 
 - **现象**（用户实测）：引擎明明已就绪，折叠态胶囊**有时**还显示「启动中」，观感"不稳定"。
-  注：其中一部分是 I1 那次失败启动造成的（那几秒确实没就绪），但**更新滞后**这个窗口客观存在。
-- **根因**：岛上文案由 `EngineService.startIslandLoop()` **每 5 秒**轮询 `supervisor.state.value` 后写入；
-  状态从 `Starting` → `Healthy` 的瞬间不会立刻反映。
-- **建议修法**：让 `stateJob` 的收集回调（已经收到每次状态变化）也刷新岛（把 5 秒轮询降级为兜底）；
-  注意 `setAuto` 自带幂等去重，重复调用无副作用。
-- **怎么验**：杀引擎后重启，秒表盯着胶囊：从日志 `engine healthy on :3180` 到胶囊变「就绪」应 < 1 秒。
+- **根因**：岛上文案由 `EngineService.startIslandLoop()` **每 5 秒**轮询 `supervisor.state.value`
+  后写入；状态从 `Starting` → `Healthy` 的瞬间不会立刻反映。
+- **修法**：把「算一次自动层文案并写岛」抽成 `applyIslandAuto()`，由**两处**调用 ——
+  监督器状态收集回调（状态一变立刻刷岛）+ 5 秒轮询（降级为兜底：会话树变化、
+  Agent 层过期回落这类状态之外的变化）。`FluidCloud.setAuto` 自带幂等去重，重复调用无副作用。
+- **怎么验（已实测）**：跑完 I1 的重开流程，盯 `engine healthy on :3180` 的出现时刻与
+  胶囊变「就绪」的时刻：实测 08:28:27.536 引擎 healthy，同一秒（+18054ms 采样点）胶囊已是「就绪」，
+  **< 1 秒**（修前最长要等满 5 秒）。
 
-### I3. 折叠态看不到"Agent 在干什么"（字段放错了位置）
+### I3. 折叠态看不到"Agent 在干什么"（字段放错了位置，v1.2.30 已修）
 
-- **现象**（用户实测）：Agent `island set "文案资源化验证" 77` 后，**折叠态只有一条进度线 + 77%**，
+- **现象**（用户实测）：Agent `island set "整理会话" 77` 后，**折叠态只有一条进度线 + 77%**，
   看不出这条进度是关于什么的；展开后才能在左侧看到动作名。
 - **根因（界面事实，务必记住）**：
 
   | 我们设置的字段 | 折叠态（胶囊） | 展开态（面板） |
   |---|---|---|
   | `setSmallIcon` | ✅ 左侧小图标 | ✅ 右侧应用图标 |
-  | `setShortCriticalText`（就绪/工作中/45%/完成） | ✅ 右侧状态词 | ✅ |
+  | `setShortCriticalText` | ✅ 右侧状态词 | ✅ |
   | `ProgressStyle`（有百分比=真实进度条；无=不确定进度） | ✅ 那条**横线** | ✅ 中部 |
   | `setContentTitle`（项目名 / **Agent 动作**） | ❌ 不显示 | ✅ 左侧 |
   | `setContentText`（Agent 附带说明） | ❌ 不显示 | ✅ 正文 |
   | `addAction`「退出」 | ❌ 不显示 | ✅ 底部 |
 
-  → Agent 的动作名放在 `title`，所以折叠态看不到。（另：本机"不确定进度"渲染成**横线**，**不是转圈**——
-  这也解释了「从没见过转圈图标」。）
-- **建议修法**：Agent 报进度时把动作名放进 `shortCriticalText`，例如 `整理会话 77%`，
-  `title` 仍保留完整动作给展开态。**文案格式需用户确认**（候选：`动作 77%` / `动作 · 77%` / 不带百分比时显示「工作中」）。
-- **怎么验**：`island set "整理会话" 60` → 折叠态应能读出"在干什么"。
+  → 动作名原本放在 `title`，所以折叠态看不到。（另：本机"不确定进度"渲染成**横线**，
+  **不是转圈** —— 这也解释了「从没见过转圈图标」。）
+- **修法**：Agent 报进度时把动作名写进 `shortCriticalText`，格式按用户定稿：
+  **`动作 空格 百分比`**（如 `整理会话 77%`）；没有百分比时只显示动作名本身，不补固定词。
+  `title` 仍保留完整动作给展开态。
+  ⚠️ **文案必须动态拼，禁止硬编码**：动作名来自 Agent 上报、百分比来自进度值，
+  代码与资源里只有一份格式模板 `island_action_progress`（`%1$s %2$d%%`），
+  不出现任何具体动作名或数字。
+- **怎么验（已实测）**：
+  ```bash
+  curl -sS -X POST -d '{"action":"set","title":"整理会话","progress":77}' \
+       http://127.0.0.1:3183/island
+  dumpsys notification --noredact | grep -A 60 'id=4242' | grep -E 'android.title=|shortCriticalText'
+  #   android.title=String (整理会话)            ← 展开态用
+  #   android.shortCriticalText=String (整理会话 77%)   ← 折叠态用
+  ```
+  换成别的动作名 / 别的进度，胶囊文字跟着变（说明没写死）；`island set` 不带 progress 时
+  短文本就是动作名本身。
 
 ### 附：本轮实测出来的验证配方（下次直接用）
 
@@ -768,7 +803,11 @@ dumpsys notification --noredact | grep -A 3 'pkg=app.dsh.mobile.dev.*id=4242' | 
 #   期望：ONGOING_EVENT|NO_CLEAR|FOREGROUND_SERVICE|PROMOTED_ONGOING
 # 开关（设置页「流体云状态岛」）落库在哪
 cat /data/user/0/app.dsh.mobile.dev/shared_prefs/dsh_ui.xml     # key: island_enabled
-# 引擎侧监督器日志
-logcat -d | grep EngineSupervisor        # healthy / exited / EADDRINUSE: killed orphan…
+# 引擎侧监督器日志（含 I1 的等待证据）
+logcat -d | grep EngineSupervisor        # healthy / exited / previous engine shutdown finished after ...
 # 单测（本地跑不了，看 CI 的 testDebugUnitTest 步骤）
 ```
+
+> ⚠️ 下载 CI 产物时注意：`dl-resume.js` 是**按字节续传**的，
+> 换一个 run 重新下载前**必须先删掉 `artifact.zip`**，否则会把新包续在旧包后面，
+> 解出来还是上一版的内容（v1.2.30 实测踩到：dex 里搜不到新加的日志字符串）。

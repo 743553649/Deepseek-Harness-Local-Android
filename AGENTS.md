@@ -45,7 +45,9 @@
   ① 岛通知必须**同时就是** `EngineService` 的前台服务通知（同一个 id）—— 换成普通 ongoing 通知，
      进程被杀后胶囊会一直留在通知栏点不掉；
   ② 退出路径停引擎必须**异步**（状态同步变更、只有 kill 与等待在后台），
-     且**不能**在 `spawnEngine()` 之前不等旧引擎退干净（~8 秒）—— 那是 EADDRINUSE 的来源；
+     且**停引擎的收尾工作没跑完之前不能 `spawnEngine()`**（等 `pendingShutdown` 那个 future，
+     不是等进程退出）—— `EngineProcess.stop()` 的强杀走的是**全局 PTY 句柄**，
+     新引擎先起来就会被打死（v1.2.30 真机实测，详见 `docs/PITFALLS.md` I1）；
   ③ 别把 `START_NOT_STICKY` 改回 `START_STICKY`（用户要求"杀掉就停"，不再自我复活）。
 
 ---
@@ -81,7 +83,7 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 | 改动是否真进了二进制 | 解出 `classes*.dex` 后 `grep -a` 关键字（例：`--port`、`127.0.0.1:3180`） |
 | 引擎能否在指定端口起来 | 直接跑引擎加 `--port`，看监听端口与日志 |
 | 引擎为什么起不来 | 读 `/data/user/0/<pkg>/files/engine/engine.log` |
-| 流体云状态岛上显示什么 | `dumpsys notification --noredact`（判据与配方见 `docs/PITFALLS.md` H 节已修项 + **I 节：待修项 / 折叠与展开的字段对照表 / 验证命令**） |
+| 流体云状态岛上显示什么 | `dumpsys notification --noredact`（判据与配方见 `docs/PITFALLS.md` H 节已修项 + **I 节：v1.2.30 修掉的 I1~I3 / 折叠与展开的字段对照表 / 验证命令**） |
 
 工具位置：`engine/extensions/android-buildtools/bin/{aapt2,apksigner}`（扩展中心的工具**不在 PATH 里**，要用绝对路径）。
 
@@ -134,5 +136,5 @@ bash push.sh "发版说明" v1.2.26    # 额外打 tag → 产出永久 Release
 - **`docs/ARCHITECTURE.md`** —— 导航：引擎启动链路、目录布局、端口分配、**关键文件职责表**、
   四条数据流（含流体云上报）、CI 流水线、与上游的差异清单（改前先查这里找「该改哪个文件」）
 - **`docs/PITFALLS.md`** —— 踩坑记录（A~I 节，格式：现象 → 根因 → 修法 → 验证）；
-  **I 节 = 下一轮待修清单 + 折叠/展开的字段对照表 + 真机验证配方**
+  **I 节 = v1.2.30 修掉的 I1~I3（含根因）+ 折叠/展开的字段对照表 + 真机验证配方**
 - `README.md` / `README_EN.md` —— 面向用户的产品说明
