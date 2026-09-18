@@ -23,6 +23,10 @@
     <string name="drawer_engine_address">访问地址 %1$s</string>
     <string name="drawer_engine_version">版本 %1$s</string>
     <string name="drawer_theme">主题：浅色（深色模式已禁用）</string>
+
+    <!-- 启动加载页文案：只描述"在干什么"，不出现端口/域名 -->
+    <string name="loading_boot">正在启动引擎…</string>
+    <string name="loading_ready">引擎已就绪，正在进入界面…</string>
     <string name="menu_title">设置选项</string>
     <string name="menu_landscape">横屏模式</string>
     <string name="menu_hide_toolbar">隐藏工具栏</string>

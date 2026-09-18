@@ -487,7 +487,14 @@ class MainActivity : Activity() {
             }
         }
         drawerStatus.text = text
-        loadingStatus.text = text
+        // 加载页不显示端口/域名：就绪态换成"正在进入界面…"，未启动态换成"正在启动引擎…"
+        loadingStatus.text = when (state) {
+            is EngineSupervisor.State.Healthy,
+            is EngineSupervisor.State.SafeMode -> getString(R.string.loading_ready)
+            is EngineSupervisor.State.Idle,
+            is EngineSupervisor.State.Stopped -> getString(R.string.loading_boot)
+            else -> text
+        }
     }
 
     override fun onBackPressed() {
