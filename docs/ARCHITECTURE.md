@@ -39,7 +39,7 @@
 | 1 | `DshApp.kt` | Application 入口（Manifest 的 `android:name`） |
 | 2 | `MainActivity.kt` | 启动 `EngineService`，订阅状态流；Healthy 后 WebView 加载 `state.webUrl`（引擎宣布的**带认证 token 入口**，0.1.5+；未宣布时退回裸 `http://127.0.0.1:${state.port}/`） |
 | 3 | `service/EngineService.kt` | 前台服务（`specialUse` 类型，规避 Android 14 的 dataSync 6 小时上限） |
-| 4 | `engine/EngineSupervisor.kt` | **核心状态机**：`Idle → Installing → Starting → Healthy(port)`，失败走 `Backoff → Failed` |
+| 4 | `engine/EngineSupervisor.kt` | **核心状态机**：`Idle → Installing → Starting → Healthy(port)`，失败走 `Backoff → Failed`；spawn 之前先等上一次停引擎的收尾跑完（v1.2.30 I1 —— `stop()` 的强杀走全局 PTY 句柄，新引擎先起来会被打死） |
 | 5 | `engine/RuntimeInstaller.kt` | Installing 阶段：解压 `assets/runtime.zip` 到 `filesDir/engine`，恢复可执行位 |
 | 6 | `engine/EngineConfig.kt` | 组装子进程环境变量（PATH / LD_LIBRARY_PATH / DSH_HOME / 端口常量…） |
 | 7 | `engine/EngineProcess.kt` | **fork + exec**：`node --expose-internals <dsh bin.js> web --no-open --port <n>`（ROOT 模式下外层套 `su -c`）。⚠️ **带补丁时必须换形式**：`--patch <file> --profile web --no-open --port <n>` —— `web` 子命令显式拒收父级 `--patch`，照原样下会**引擎不启动**（详见 `EngineProcess.kt` 里的注释与提交 `133682e`） |
@@ -74,7 +74,7 @@ files/
 │   ├── extensions/<id>/       ← 扩展中心安装的环境（git/python/jdk…）
 │   └── engine.log             ★ 引擎日志在这里（不在 files/ 根）
 ├── dsh-home/                  $DSH_HOME —— 用户资产
-│   ├── profiles/              插件/配置 YAML（profiles/web/fluid-cloud.mjs 是 App 每次启动重写的流体云插件）
+│   ├── profiles/              插件/配置 YAML（profiles/web/fluid-cloud.mjs 是 App 每次启动从 assets 复制过来的流体云插件）
 │   ├── .android-fluid-cloud.patch.yml   ← 流体云插件的 --patch 补丁层（App 每次启动重写）
 │   ├── profiles.last-good/    ProfileGuardian 的健康快照
 │   ├── sessions/              会话数据
@@ -139,15 +139,15 @@ scripts/
 | `SettingsActivity.kt` | 458 | 设置页（权限模式 / 显示 / **流体云开关** / 扩展入口） | 加设置项 |
 | `MainActivity.kt` | 397 | WebView 外壳 + 状态条 + 预览模式；Healthy 后用 `state.webUrl`（带 token）加载；**返回键 = `moveTaskToBack`（只退到后台，不停引擎）** | 改主界面 |
 | `ExtensionStoreActivity.kt` | 390 | 扩展中心 UI | 改扩展 UI |
-| `engine/EngineConfig.kt` | 484 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入**（含 `island` 命令、**流体云插件与补丁层**） | 改端口 / 环境变量 / 注入脚本 |
+| `engine/EngineConfig.kt` | 445 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入**（含 `island` 命令、**流体云插件与补丁层**；插件源码在 `assets/fluid-cloud.mjs`，启动时复制并替换端口占位符） | 改端口 / 环境变量 / 注入脚本 |
 | `engine/AgentBridge.kt` | 405 | 环回 HTTP：通知 / 读屏 / 点击 / **`/island`（流体云三层上报）** / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
-| `engine/EngineSupervisor.kt` | 464 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启；**异步停止 / 监督代际 epoch / 只按本轮日志判 EADDRINUSE** | 改启动/自愈逻辑 |
+| `engine/EngineSupervisor.kt` | 553 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启；**异步停止 / 停引擎收尾跑完才 spawn（pendingShutdown）/ 监督代际 epoch / 只按本轮日志判 EADDRINUSE** | 改启动/自愈逻辑 |
 | `engine/ProfileGuardian.kt` | 308 | 自愈层：健康快照 / last-good 回滚 / 安全模式 | 改自愈策略 |
 | `engine/Privilege.kt` | 244 | NORMAL / SHIZUKU / ROOT 三模式探测与切换，dsh-home 保护 | 改权限模式 |
 | `OnboardingActivity.kt` | 232 | 首次启动引导 | 改引导流程 |
 | `engine/RuntimeInstaller.kt` | 208 | 安装 `assets/runtime.zip`（或 MANIFEST 远程包） | 改安装逻辑 |
-| `FluidCloud.kt` | 298 | **流体云状态岛**：三层优先级（Agent 上报 > 引擎忙碌 > 自动层）、过期回落、设置开关、岛通知即前台服务通知 | 改岛上显示什么 |
-| `service/EngineService.kt` | 329 | 前台服务：保活 + **岛自动层 5 秒轮询** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
+| `FluidCloud.kt` | 303 | **流体云状态岛**：三层优先级（Agent 上报 > 引擎忙碌 > 自动层）、过期回落、设置开关、岛通知即前台服务通知；折叠态文案 = `动作 空格 百分比`（v1.2.30 I3，动态拼不写死） | 改岛上显示什么 |
+| `service/EngineService.kt` | 346 | 前台服务：保活 + **岛自动层（状态一变立刻刷 + 5 秒轮询兜底，v1.2.30 I2）** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
 | `engine/SessionWatcher.kt` | 79 | 会话活动探测（只 stat 文件拿「项目名 + 活跃项目数」，不解压不读内容） | 改岛的项目名来源 |
 | `src/test/.../SessionWatcherTest.kt` | 93 | SessionWatcher 的 JVM 单测（目录名解码 / 文件名版本差异 / 活跃窗口） | 改探测逻辑时同步补 |
 | `engine/EngineProcess.kt` | 204 | fork + exec 引擎进程（`--port` 在这里）；**扫描 stdout 捕获 `dsh web:` 入口** | 改启动参数 |

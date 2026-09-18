@@ -14,6 +14,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * 引擎监督器：冷启动 → 健康检查 → 运行中 → 崩溃退避重启 的完整状态机。
@@ -70,6 +72,26 @@ class EngineSupervisor(private val ctx: Context) {
     }
 
     private var process: EngineProcess? = null
+
+    /**
+     * 上一次「异步停引擎」的收尾工作：**`EngineProcess.stop()` 整段跑完**才算完成（v1.2.30，修 I1）。
+     *
+     * 为什么"等旧进程退出"不够（本轮最重要的坑，真机实测 + 日志对时确认）：
+     * `EngineProcess.stop()` 里最后那次强杀用的是 `Pty.nativeForceKill()` / `Pty.nativeChildPid()` ——
+     * 那是 **PTY 里"当前子进程"的全局句柄，不是本进程对象自己的 pid**。于是：
+     *   ① 退出时引擎收到 TERM，约 2 秒就退出了（端口也放开了）；
+     *   ② 但 `stop()` 的等待循环看的是 exitFuture，它迟迟不返回 → `stop()` 一路数到 10 秒超时；
+     *   ③ 这 10 秒里用户重开了 App，新引擎已经起来并**成为"当前子进程"**；
+     *   ④ 10 秒一到，那句强杀（以及 su 的进程组击杀）**打在了新引擎身上**。
+     * 观测到的正是：新引擎启动成功 → 10.4 秒后被 SIGKILL（`engine exited, raw status=0x9`）→
+     * 再拉起又撞端口。只等 exitFuture 完全挡不住这一段。
+     *
+     * 处置：监督循环在 spawn 之前等这一个 future —— 它由 `stop()` 返回时兑现，
+     * 天然覆盖「TERM → 等待 → 强杀 → 进程组清理」全程，之后才允许 spawn 新引擎。
+     */
+    @Volatile
+    private var pendingShutdown: CompletableFuture<Unit>? = null
+
     private var loopJob: Job? = null
     private var userStop = false
     private var scopeRef: CoroutineScope? = null
@@ -128,6 +150,15 @@ class EngineSupervisor(private val ctx: Context) {
      * 残留风险与兜底：旧引擎可能还占着端口，新循环启动时若撞上 EADDRINUSE，
      * 监督循环已有专门的处置（用 su 清残留 node 后重试，见 supervisionLoop 的
      * `deterministicFailure.contains("EADDRINUSE")` 分支）。
+     *
+     * 【v1.2.30 / I1】这个"残留风险"在真机上被复现了：用户在 8 秒窗口内重开 App，
+     * 新引擎启动即被上一轮的强杀打掉、再拉起又撞端口。所以这里把这次停引擎的**收尾工作**
+     * 记进 [pendingShutdown]，由监督循环在 spawn 之前等它跑完（详见该字段的注释）。
+     *
+     * ⚠️ `dying == null` 时**绝不能**覆盖 [pendingShutdown]：退出路径会调本方法两次 ——
+     * `exitCompletely()` 一次（此时 process 还在），紧接着 `stopSelf()` → `onDestroy()` 再一次
+     * （此时 process 已被上一句置空）。若第二次照写就把刚记下的收尾工作抹掉了，
+     * 等待逻辑空转、原问题原样复现（v1.2.30 真机实测踩到，logcat 里连等待日志都没有）。
      */
     fun stopAsync(scope: CoroutineScope) {
         epoch++
@@ -136,8 +167,53 @@ class EngineSupervisor(private val ctx: Context) {
         loopJob = null
         val dying = process
         process = null
+        if (dying != null) {
+            val finished = CompletableFuture<Unit>()
+            pendingShutdown = finished
+            scope.launch(Dispatchers.IO) {
+                try {
+                    dying.stop()
+                } finally {
+                    finished.complete(Unit)
+                }
+            }
+        }
         _state.value = State.Stopped
-        scope.launch(Dispatchers.IO) { runCatching { dying?.stop() } }
+    }
+
+    /**
+     * 等上一次停引擎的收尾工作跑完（最多 [SHUTDOWN_WAIT_SECONDS] 秒）。
+     *
+     * **必须在后台线程调用**（IO 线程）：这段时间纯粹在等引擎退出与清理，
+     * 放主线程就是 ANR —— 那正是 [stopAsync] 当初改成异步的原因。
+     * 没有待退引擎时立即返回；超时也放行，交给原有的 EADDRINUSE 兜底处置。
+     */
+    private fun awaitPendingShutdown() {
+        val pending = pendingShutdown
+        pendingShutdown = null
+        if (pending == null) {
+            Log.i(TAG, "no previous engine shutdown pending; spawning immediately")
+            return
+        }
+        if (pending.isDone) {
+            Log.i(TAG, "previous engine shutdown already finished; spawning immediately")
+            return
+        }
+        val startedAt = System.currentTimeMillis()
+        runCatching { pending.get(SHUTDOWN_WAIT_SECONDS, TimeUnit.SECONDS) }
+            .onSuccess {
+                Log.i(
+                    TAG,
+                    "previous engine shutdown finished after ${System.currentTimeMillis() - startedAt}ms; spawning new one",
+                )
+            }
+            .onFailure {
+                Log.w(
+                    TAG,
+                    "previous engine shutdown still running after ${SHUTDOWN_WAIT_SECONDS}s; " +
+                        "spawning anyway (EADDRINUSE fallback armed)",
+                )
+            }
     }
 
     /**
@@ -260,6 +336,12 @@ class EngineSupervisor(private val ctx: Context) {
                     }
                 }
                 _installProgress.value = null
+
+                // 【v1.2.30 / I1】spawn 之前先等上一轮异步停掉、还没退干净的引擎（约 8 秒）。
+                // 后台等，不阻塞主线程；超时放行，交给下面的 EADDRINUSE 兜底处置。
+                withContext(Dispatchers.IO) { awaitPendingShutdown() }
+                // 等待期间可能又发生过 stop/restart（token 过期）→ 本循环已不在任，立刻收工
+                if (token != epoch) return
 
                 _state.value = State.Starting
                 val proc = withContext(Dispatchers.IO) { spawnEngine() }
@@ -460,5 +542,12 @@ class EngineSupervisor(private val ctx: Context) {
 
         /** 引擎打印 "dsh web: <url>" 与健康检查通过之间的最大等待窗 */
         private const val WEB_URL_TIMEOUT_MS = 15_000L
+
+        /**
+         * spawn 之前等待上一次停引擎收尾的上限。
+         * `EngineProcess.stop()` 的兜底是「TERM 后等 10 秒再强杀」，外加 su 的进程组清理，
+         * 取 15 秒覆盖全程；超时就让原有的 EADDRINUSE 兜底接手。
+         */
+        private const val SHUTDOWN_WAIT_SECONDS = 15L
     }
 }

@@ -37,6 +37,9 @@ class EngineService : Service() {
 
     private var stateJob: Job? = null
     private var islandJob: Job? = null
+
+    /** 会话树扫描器（两个调用方共用，见 [applyIslandAuto]）；懒建，避免每次刷岛都重扫根目录 */
+    private var islandWatcher: SessionWatcher? = null
     private val stateScope by lazy { CoroutineScope(Dispatchers.Main) }
 
     override fun onCreate() {
@@ -70,10 +73,14 @@ class EngineService : Service() {
         // 流体云自动层（v1.2.27）：项目名 + 引擎状态 + agent 忙碌状态
         startIslandLoop(app)
 
-        // 状态回写到常驻通知（仅 SDK<36 的老系统；有流体云时同一条通知由岛自己维护）
+        // 状态回写到常驻通知（仅 SDK<36 的老系统；有流体云时同一条通知由岛自己维护），
+        // 并且【v1.2.30 / I2】状态一变就立刻刷岛 —— 岛上文案不能再等 5 秒轮询。
         if (stateJob == null) {
             stateJob = stateScope.launch {
-                app.supervisor.state.collect { updateNotification(it) }
+                app.supervisor.state.collect {
+                    updateNotification(it)
+                    applyIslandAuto(app)
+                }
             }
         }
         // 【v1.2.28】不再 START_STICKY：用户手动杀掉 App 后系统会立刻把它拉起来，
@@ -98,51 +105,61 @@ class EngineService : Service() {
     }
 
     /**
-     * 流体云自动层：每 5 秒算一次，优先于「就绪/工作中」这类基线文案。
+     * 流体云自动层：算一次「项目名 + 引擎状态」写进岛。
      *   - 引擎状态：启动中 / 引擎异常 / 就绪
      *   - 项目名：最近有会话写入的项目；5 分钟内有写入的项目多于 1 个时显示「N 个项目」
      *   - 忙碌：由引擎插件上报的 agent/status 决定（思考中、跑命令中都算忙）
      * Agent 显式上报（island set/done）会盖住这一层，见 FluidCloud。
+     *
+     * 【v1.2.30 / I2】本函数有两个调用方：
+     *  1. 监督器状态收集回调（每次状态变化）—— 引擎就绪的**瞬间**就刷岛；
+     *  2. 5 秒轮询 —— 只是兜底（会话树变化、Agent 层过期回落这类状态之外的变化）。
+     * 旧实现只有第 2 条，于是引擎明明已就绪，岛上还可能挂着「启动中」最多 5 秒（真机实测）。
+     * `setAuto` 自带幂等去重（内容相同直接 return），重复调用无副作用。
      */
+    private suspend fun applyIslandAuto(app: DshApp) {
+        val watcher = islandWatcher ?: SessionWatcher(EngineConfig.dshHome(this)).also { islandWatcher = it }
+        // 目录遍历放 IO 线程：主线程每 5 秒扫一次会话树会掉帧
+        val snapshot = withContext(Dispatchers.IO) {
+            runCatching { watcher.snapshot() }.getOrNull()
+        }
+        val project = when {
+            snapshot == null -> getString(R.string.island_dsh)
+            snapshot.activeProjects > 1 ->
+                getString(R.string.island_projects, snapshot.activeProjects)
+            else -> snapshot.project ?: getString(R.string.island_dsh)
+        }
+        when (app.supervisor.state.value) {
+            // 忙碌词交给 FluidCloud 拼：agent/status 一到就立刻反映，不必等这轮轮询
+            is EngineSupervisor.State.Healthy ->
+                FluidCloud.setAuto(
+                    this, project,
+                    getString(R.string.island_ready), getString(R.string.island_busy),
+                )
+            is EngineSupervisor.State.Backoff, is EngineSupervisor.State.Failed ->
+                FluidCloud.setAuto(
+                    this, getString(R.string.island_dsh), getString(R.string.island_error),
+                )
+            // Installing / Starting：本身看不出"首次启动"还是"崩溃后重启"，
+            // 而 Backoff 只存在 2 秒就被这两个状态覆盖 —— 真机上引擎反复崩，
+            // 岛却一直说「启动中」，用户以为一切正常（实测）。连续失败 ≥2 次就报异常。
+            else -> if (app.supervisor.lastBackoffAttempt >= 2) {
+                FluidCloud.setAuto(
+                    this, getString(R.string.island_dsh), getString(R.string.island_error),
+                )
+            } else {
+                FluidCloud.setAuto(
+                    this, getString(R.string.island_dsh), getString(R.string.island_starting),
+                )
+            }
+        }
+    }
+
     private fun startIslandLoop(app: DshApp) {
         if (islandJob != null) return
         islandJob = stateScope.launch {
-            val watcher = SessionWatcher(EngineConfig.dshHome(this@EngineService))
             while (true) {
-                // 目录遍历放 IO 线程：主线程每 5 秒扫一次会话树会掉帧
-                val snapshot = withContext(Dispatchers.IO) {
-                    runCatching { watcher.snapshot() }.getOrNull()
-                }
-                val project = when {
-                    snapshot == null -> getString(R.string.island_dsh)
-                    snapshot.activeProjects > 1 ->
-                        getString(R.string.island_projects, snapshot.activeProjects)
-                    else -> snapshot.project ?: getString(R.string.island_dsh)
-                }
-                when (app.supervisor.state.value) {
-                    // 忙碌词交给 FluidCloud 拼：agent/status 一到就立刻反映，不必等这轮轮询
-                    is EngineSupervisor.State.Healthy ->
-                        FluidCloud.setAuto(
-                            this@EngineService, project,
-                            getString(R.string.island_ready), getString(R.string.island_busy),
-                        )
-                    is EngineSupervisor.State.Backoff, is EngineSupervisor.State.Failed ->
-                        FluidCloud.setAuto(
-                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_error),
-                        )
-                    // Installing / Starting：本身看不出"首次启动"还是"崩溃后重启"，
-                    // 而 Backoff 只存在 2 秒就被这两个状态覆盖 —— 真机上引擎反复崩，
-                    // 岛却一直说「启动中」，用户以为一切正常（实测）。连续失败 ≥2 次就报异常。
-                    else -> if (app.supervisor.lastBackoffAttempt >= 2) {
-                        FluidCloud.setAuto(
-                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_error),
-                        )
-                    } else {
-                        FluidCloud.setAuto(
-                            this@EngineService, getString(R.string.island_dsh), getString(R.string.island_starting),
-                        )
-                    }
-                }
+                applyIslandAuto(app)
                 // Agent 忘了调 island done 时别让「60%」一直挂着（引擎空闲 + 10 分钟无更新 → 回自动层）
                 FluidCloud.expireStaleAgent(this@EngineService)
                 delay(ISLAND_INTERVAL_MS)

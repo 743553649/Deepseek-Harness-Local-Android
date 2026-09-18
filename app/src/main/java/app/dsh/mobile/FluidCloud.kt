@@ -122,7 +122,12 @@ object FluidCloud {
         agentTitle = title
         agentText = text
         agentPercent = percent
-        agentCritical = percent?.let { "$it%" } ?: ctx.getString(R.string.island_busy)
+        // 【v1.2.30 / I3】折叠态只显示 SmallIcon + shortCriticalText（title 只有展开态才看得到），
+        // 所以动作名必须进 shortCriticalText，否则用户只看到一条光秃秃的进度线（真机实测）。
+        // 文案格式按用户定稿的 A：`动作 空格 百分比`；没有百分比时只显示动作名本身。
+        // ⚠️ 动作名与百分比都是**运行时数据**（前者来自 Agent 上报、后者来自进度值），
+        // 这里只有一份格式模板，禁止把具体动作名/数字硬编码进代码或资源。
+        agentCritical = percent?.let { ctx.getString(R.string.island_action_progress, title, it) } ?: title
         agentUpdatedAt = android.os.SystemClock.elapsedRealtime()
         agentIsDone = false
         render(ctx)
