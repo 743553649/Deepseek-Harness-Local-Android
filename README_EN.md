@@ -3,7 +3,7 @@
 **Deepseek-Harness-Local-Android — Run the full DeepSeek Harness AI agent locally on Android (Local for Android) — no root, no Termux, no PC needed.**
 
 [![CI](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml/badge.svg)](https://github.com/743553649/Deepseek-Harness-Local-Android/actions/workflows/android-build.yml)
-![Release](https://img.shields.io/badge/release-v1.2.30-blue)
+![Release](https://img.shields.io/badge/release-v1.2.31-blue)
 ![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
@@ -78,7 +78,7 @@ Normal mode is the default; options whose capability isn't ready are grayed out 
 
 ## 📦 Installation
 
-**Download a Release (recommended)**: grab the APK from [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) (pick `arm64-v8a` for phones; latest is **v1.2.30**), then install with unknown sources allowed. Any v1.0.0+ build can be installed over the top.
+**Download a Release (recommended)**: grab the APK from [Releases](https://github.com/743553649/Deepseek-Harness-Local-Android/releases) (pick `arm64-v8a` for phones; latest is **v1.2.31**), then install with unknown sources allowed. Any v1.0.0+ build can be installed over the top.
 
 **Build from source** (JDK 17 + Android SDK, NDK r26+, CMake 3.22.1):
 

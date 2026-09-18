@@ -706,7 +706,7 @@
 
 ---
 
-## I. 流体云 · v1.2.30 修掉的问题（I1~I3）与界面事实
+## I. 流体云 · v1.2.30~v1.2.31 修掉的问题（I1~I6）与界面事实
 
 > 本节原本是「下一轮开工清单」。三项已在 **v1.2.30** 修完并真机验证，现按
 > 「现象 → 根因 → 修法 → 验证」归档，供以后回看。上一轮已修项见 H1~H7。
@@ -792,6 +792,57 @@
   ```
   换成别的动作名 / 别的进度，胶囊文字跟着变（说明没写死）；`island set` 不带 progress 时
   短文本就是动作名本身。
+
+### I4. 切回 App 岛上就闪一下「启动中」（v1.2.31 已修）
+
+- **现象**（用户实测）："时不时还会出现启动中的状态，不知道怎么触发的"。
+- **根因**（代码必然，不是偶发）：`MainActivity.onResume()` 每次都调 `EngineService.start()`
+  → `onStartCommand` → `startAsForeground()`；而该方法贴的是**写死的首帧**通知
+  「DSH · 启动中」，要等下一次自动层轮询（最长 5 秒）才被纠正回「就绪」。
+  于是**每次切回 App 都会闪一下「启动中」**。
+- **修法**：`FluidCloud.foregroundNotification()` 复用**当前内容**（Agent 上报层 > 自动层 > 首帧），
+  只有真正冷启动（两层都还空着）才显示「启动中」。
+- **怎么验（已实测）**：
+  ```bash
+  input keyevent KEYCODE_HOME; sleep 2
+  am start -n app.dsh.mobile.dev/app.dsh.mobile.MainActivity; sleep 0.5
+  dumpsys notification --noredact | grep -A 60 'id=4242' | grep shortCriticalText   # 修前这里是「启动中」
+  ```
+
+### I5. 岛上的项目名指错（"不是我正在弄的那个"）（v1.2.31 已修）
+
+- **现象**（用户实测）：展开态的项目名不是当前在用的项目。
+- **根因**：自动层的项目名来自 `SessionWatcher` 的「**最近有写入**的会话」。
+  两个项目都在活跃窗口（5 分钟）内时谁最后写谁赢 —— 实测 dev 版里 `ceshi` 与 `MT2`
+  都在窗口内，于是岛上显示的是"另一个"，或者干脆显示「2 个项目」。
+  **"最近有写入" ≠ "我正在看/正在用"**，这是数据源选错了。
+- **修法**（新增一条上报链路）：
+  1. 引擎侧插件订阅 `api-session/activity`（**用户在某个会话里发消息**时引擎就发它，参数是会话 id）
+     以及 `agent/status` 里的 `payload.agent.id`（引擎的 `SessionId`，与 `api-session/status` 同源）
+     → `POST /island {"action":"active-session","sessionId":"session-<uuid>"}`；
+  2. App 侧 `SessionWatcher.projectOfSession()` 读 `$DSH_HOME/storages/workspace.json`
+     （只有这里才有"会话 id → 工作区标题"这张表），把会话 id 翻成项目名，优先用它；
+     查不到就回落到原来的启发式；
+  3. 插件顺带把 `storages/workspace.json` chmod 0644、`storages` 目录 0755 ——
+     root 模式下引擎新建的是 0600/0700，App 读不到。
+- **怎么验（已实测）**：
+  ```bash
+  curl -sS -X POST -d '{"action":"active-session","sessionId":"session-473e2c80-..."}' http://127.0.0.1:3183/island
+  dumpsys notification --noredact | grep -A 60 'id=4242' | grep android.title   # → MT2
+  ```
+  换上另一个会话 id → 岛上的项目名跟着切（实测 ceshi ⇄ MT2 都对）。
+  ⚠️ 插件那半条（订阅事件）要**真的发一条消息**才能验到，别只看接口。
+
+### I6. 「退出」的语义变了：现在是"退出 App"而不是"只停引擎"（v1.2.31 用户要求）
+
+- **用户原话**：点「退出」要的是退出 App，而不是只把引擎停掉、App 还挂在后台。
+- **实现**：`exitCompletely()` 先让引擎**优雅停完**（复用 I1 的 `pendingShutdown`：
+  `EngineSupervisor.onShutdownFinished()`），**再** `Process.killProcess(Process.myPid())`。
+  ⚠️ 顺序不能反：一上来就杀进程，引擎是被 PTY 断开带走的，会话来不及落盘。
+  等待期间用户若又打开了 App（监督器重新在跑）就**不杀**（用户改主意了）。
+- **怎么验（已实测）**：点「退出」后第 11 秒 —— App 进程消失、岛通知 0 条、
+  3180 无监听、服务记录 0；logcat：
+  `engine stopped; killing app process (user asked for full exit)` → `Quit itself, Pid:...`。
 
 ### 附：本轮实测出来的验证配方（下次直接用）
 
