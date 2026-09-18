@@ -1,6 +1,7 @@
 package app.dsh.mobile
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
@@ -8,18 +9,23 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
+import android.view.animation.PathInterpolator
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import android.widget.TextView
+import app.dsh.mobile.engine.EngineConfig
 import app.dsh.mobile.engine.EngineSupervisor
 import app.dsh.mobile.engine.Privilege
 import app.dsh.mobile.service.EngineService
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -30,16 +36,29 @@ import kotlinx.coroutines.launch
  * WebView 容器。
  *
  * UI 策略：不重写官方 WebUI（上游 developer preview 迭代快，追协议是无底洞），
- * 只做原生外壳 —— 引擎 Healthy 后加载 127.0.0.1 回环页面，状态条显示引擎生命周期。
+ * 只做原生外壳 —— 引擎 Healthy 后加载 127.0.0.1 回环页面。
  *
- * 设置入口：右上角 ⋯ 跳转独立设置页（SettingsActivity，MIUI 风格分组卡片），
- * 不再使用悬浮弹窗菜单。
+ * 导航（浅色改版）：顶部常驻导航栏（左汉堡 + 引擎状态），左侧抽屉承载引擎信息与功能入口；
+ * 抽屉展开时内容层等比缩小退后、遮罩淡入。原「半透明悬浮工具栏 + 可拖把手」已整体移除，
+ * 引擎状态与设置入口分别落到导航栏和抽屉里。
  */
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
     private lateinit var statusBar: TextView
+    private lateinit var drawerStatus: TextView
     private var urlLoaded = false
+
+    // —— 抽屉相关：stage 是会被整体「退后」的内容层（导航栏 + 网页 + 进度条）——
+    private lateinit var stage: View
+    private lateinit var drawer: View
+    private lateinit var scrim: View
+    private var drawerWidthPx = 0
+    private var drawerProgress = 0f
+    private var drawerAnimator: ValueAnimator? = null
+    private var touchStartX = 0f
+    private var touchStartY = 0f
+    private val drawerInterpolator = PathInterpolator(0.32f, 0.72f, 0f, 1f)
 
     /** 桌面模式：桌面 UA + 固定 1280px 视口 + 手势缩放（手机浏览器"电脑模式"等价物） */
     private var desktopMode = false
@@ -65,37 +84,30 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
 
         statusBar = findViewById(R.id.statusBar)
+        drawerStatus = findViewById(R.id.drawerStatus)
         // 先赋值字段再配置：setupWebView 内部读取的是 this.webView，
         // 若写在 apply{} 里会在赋值完成前执行而触发 UninitializedPropertyAccessException。
         webView = findViewById<WebView>(R.id.webView)
         setupWebView()
+        setupDrawer()
         // 读回用户保存的页面缩放与横竖屏偏好
         readUiPrefs()
         if (landscapeMode) {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
 
-        // 热重启：用户显式动作，完整 stop→start 链路；urlLoaded 复位让 Healthy 后重载 3080
-        findViewById<TextView>(R.id.btnRestart).setOnClickListener {
-            urlLoaded = false
-            (application as DshApp).supervisor.restart()
-        }
-        // 隐藏工具栏：一键收起让网页全屏（点顶部小把手唤回）
-        findViewById<TextView>(R.id.btnHide).setOnClickListener { toggleToolbar() }
-        // 齿轮按钮：跳转独立设置页
-        findViewById<View>(R.id.btnMore).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        // 抽屉头部常驻的引擎信息（原悬浮工具栏展示的内容）
+        findViewById<TextView>(R.id.drawerAddress).text =
+            getString(R.string.drawer_engine_address, "http://127.0.0.1:${EngineConfig.PORT_BASE}")
+        findViewById<TextView>(R.id.drawerVersion).text =
+            getString(R.string.drawer_engine_version, packageVersion())
+
         // 预览模式返回：一键从 AI 起的服务页回引擎主界面
         findViewById<TextView>(R.id.btnBack).setOnClickListener {
             // 0.1.5+：优先用引擎宣布的带 token 入口（会话 cookie 可能已过期，重走 token 链换新）
             val sup = (application as DshApp).supervisor
             loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
         }
-        // 工具栏收起/唤回：点横栏文字空白区收起（网页全屏）
-        statusBar.setOnClickListener { toggleToolbar() }
-        // 把手：可拖到屏幕边缘任意位置（避让遮挡）；移动距离小于阈值视为点击唤回工具栏
-        setupHandleBar()
 
         val app = application as DshApp
         uiScope.launch {
@@ -110,6 +122,8 @@ class MainActivity : Activity() {
         super.onResume()
         // 前台进入即拉起前台服务；服务存在则幂等
         EngineService.start(this)
+        // singleTask：从通知或设置页回来时抽屉可能还开着，收一下（不播动画）
+        if (drawerProgress > 0f) setDrawerOpen(false, animate = false)
         // 从设置页返回：重新读取横竖屏/缩放偏好，若被改则同步并重载
         val oldScale = pageScale
         val oldLandscape = landscapeMode
@@ -132,8 +146,14 @@ class MainActivity : Activity() {
         landscapeMode = p.getBoolean(KEY_LANDSCAPE, false)
     }
 
+    /** 从包管理器读 versionName（AGP 8+ 默认关闭 BuildConfig，本工程统一这么做） */
+    private fun packageVersion(): String =
+        runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
+
     private fun setupWebView() {
         defaultUa = webView.settings.userAgentString
+        // 浅色底：WebView 加载完成前透出的是自己背景而不是 windowBackground，避免闪一下深色
+        webView.setBackgroundColor(WEBVIEW_BG)
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -179,7 +199,7 @@ class MainActivity : Activity() {
 
     /**
      * 预览 chrome：WebView 导航到非引擎端口的回环页面（用户点击 AI 在对话里给的
-     * http://127.0.0.1:PORT 链接）时，状态栏切预览模式并亮出返回按钮；
+     * http://127.0.0.1:PORT 链接）时，导航栏亮出返回按钮；
      * 回到引擎主界面自动恢复。AI 无需任何特殊协议，输出普通链接即可。
      */
     private fun updatePreviewChrome(url: String?) {
@@ -194,6 +214,126 @@ class MainActivity : Activity() {
     /** 统一的回环页加载入口：缩放统一由 onPageFinished 的 viewport meta 接管，这里只导航。 */
     private fun loadLocalUrl(url: String) {
         webView.loadUrl(url)
+    }
+
+    // ---------------- 导航栏 + 抽屉 ----------------
+
+    private fun setupDrawer() {
+        stage = findViewById(R.id.stage)
+        drawer = findViewById(R.id.drawer)
+        scrim = findViewById(R.id.scrim)
+
+        drawerWidthPx = drawerWidth()
+        drawer.layoutParams.width = drawerWidthPx
+        drawer.requestLayout()
+
+        findViewById<View>(R.id.btnMenu).setOnClickListener { setDrawerOpen(true) }
+        scrim.setOnClickListener { setDrawerOpen(false) }
+        setupDrawerTouch()
+        renderDrawer(0f)
+    }
+
+    /** 抽屉宽度按屏宽比例算，不写死 dp（兼容平板与横屏） */
+    private fun drawerWidth(): Int =
+        (resources.displayMetrics.widthPixels * DRAWER_WIDTH_RATIO).toInt()
+
+    private fun setDrawerOpen(open: Boolean, animate: Boolean = true) {
+        drawerAnimator?.cancel()
+        val target = if (open) 1f else 0f
+        if (!animate) {
+            renderDrawer(target)
+            return
+        }
+        drawerAnimator = ValueAnimator.ofFloat(drawerProgress, target).apply {
+            duration = DRAWER_DURATION_MS
+            interpolator = drawerInterpolator
+            addUpdateListener { renderDrawer(it.animatedValue as Float) }
+            start()
+        }
+    }
+
+    /** 抽屉进度 0=关闭、1=全开：统一驱动「内容层退后 + 遮罩 + 抽屉位移」三件事 */
+    private fun renderDrawer(p: Float) {
+        drawerProgress = p.coerceIn(0f, 1f)
+        val recede = 1f - (1f - RECEDE_SCALE) * drawerProgress
+        stage.scaleX = recede
+        stage.scaleY = recede
+        stage.translationX = resources.displayMetrics.widthPixels * STAGE_SHIFT_RATIO * drawerProgress
+        drawer.translationX = -drawerWidthPx * (1f - drawerProgress)
+        // 完全关闭时必须隐藏遮罩，否则它会挡住网页的一切触摸
+        scrim.visibility = if (drawerProgress > 0f) View.VISIBLE else View.GONE
+        scrim.alpha = SCRIM_ALPHA * drawerProgress
+    }
+
+    /**
+     * 抽屉手势：菜单项一律不设 clickable，点击与「按住右滑关闭」都在这里统一分发。
+     * 监听挂在抽屉上而不是根容器 —— WebView 会吃掉横向 MOVE，挂在根容器收不到。
+     * 不做「从左边缘滑开」：Android 10+ 手势导航把左边缘判给系统返回，会打架。
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupDrawerTouch() {
+        drawer.setOnTouchListener { _, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    drawerAnimator?.cancel()
+                    touchStartX = ev.rawX
+                    touchStartY = ev.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (ev.rawX - touchStartX).coerceAtLeast(0f)
+                    renderDrawer(1f - dx / drawerWidthPx)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = ev.rawX - touchStartX
+                    val dy = ev.rawY - touchStartY
+                    if (abs(dx) < DRAG_SLOP && abs(dy) < DRAG_SLOP) {
+                        handleDrawerItem(ev.x, ev.y)
+                    } else {
+                        setDrawerOpen(drawerProgress > DRAWER_SNAP_RATIO)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    setDrawerOpen(drawerProgress > DRAWER_SNAP_RATIO)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 命中哪个菜单项就执行哪个动作（用 getHitRect 判定，省掉给每一项加 clickable） */
+    private fun handleDrawerItem(x: Float, y: Float) {
+        val rect = Rect()
+        for ((id, action) in drawerActions) {
+            findViewById<View>(id).getHitRect(rect)
+            if (rect.contains(x.toInt(), y.toInt())) {
+                action()
+                return
+            }
+        }
+    }
+
+    private val drawerActions: List<Pair<Int, () -> Unit>>
+        get() = listOf(
+            R.id.drawerItemChat to { setDrawerOpen(false) },
+            R.id.drawerItemSettings to { openPage(SettingsActivity::class.java) },
+            R.id.drawerItemExt to { openPage(ExtensionStoreActivity::class.java) },
+            R.id.drawerItemAbout to { openPage(AboutActivity::class.java) },
+            R.id.drawerItemRestart to {
+                // 热重启：用户显式动作，完整 stop→start 链路；urlLoaded 复位让 Healthy 后重载引擎页
+                urlLoaded = false
+                (application as DshApp).supervisor.restart()
+                setDrawerOpen(false)
+            },
+        )
+
+    /** 抽屉里点开独立页面：先收抽屉再跳页 */
+    private fun openPage(cls: Class<*>) {
+        setDrawerOpen(false)
+        startActivity(Intent(this, cls))
     }
 
     /** 手势缩放开关：竖屏关闭（锁死固定全屏，禁止双指捏合/拖动移动），桌面模式开启（保留双指缩放）。
@@ -214,60 +354,17 @@ class MainActivity : Activity() {
         applyZoomControls(enable)
     }
 
-    /** 工具栏收起/唤回：收起时网页全屏，仅留顶部小把手提示可恢复 */
-    private fun toggleToolbar() {
-        val row = findViewById<View>(R.id.statusBarRow)
-        val handle = findViewById<View>(R.id.handleBar)
-        if (row.visibility == View.VISIBLE) {
-            row.visibility = View.GONE
-            handle.visibility = View.VISIBLE
-        } else {
-            row.visibility = View.VISIBLE
-            handle.visibility = View.GONE
-        }
-    }
-
-    /**
-     * 把手拖拽：按住可在父容器内自由移动（clamp 保住 60% 宽度在屏内，防止拖丢），
-     * 松手时若位移小于 touch slop（约 12px）则视为点击 → 唤回工具栏。
-     * 位置仅本次隐藏期间保持（重显工具栏后再收起回到上次位置，rotation/重建回默认）。
-     */
-    private fun setupHandleBar() {
-        val handle = findViewById<View>(R.id.handleBar)
-        val slop = 12f
-        var rawX0 = 0f; var rawY0 = 0f
-        var initTx = 0f; var initTy = 0f
-        handle.setOnTouchListener { v, ev ->
-            when (ev.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    rawX0 = ev.rawX; rawY0 = ev.rawY
-                    initTx = v.translationX; initTy = v.translationY
-                    true
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    val parent = v.parent as View
-                    v.translationX = (initTx + (ev.rawX - rawX0))
-                        .coerceIn(-v.width * 0.6f, parent.width - v.width * 0.4f)
-                    v.translationY = (initTy + (ev.rawY - rawY0))
-                        .coerceIn(0f, (parent.height - v.height).coerceAtLeast(0).toFloat())
-                    true
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    val dx = ev.rawX - rawX0; val dy = ev.rawY - rawY0
-                    if (dx * dx + dy * dy < slop * slop) toggleToolbar()
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // 旋转后屏宽变化 → 需要重算适配视口（reload 后 onPageFinished 会按当前模式
         // 与 pageScale 重写 viewport meta）。竖屏旋转屏宽同样变，故统一 reload。
         // 同时同步手势缩放开关（竖屏锁死、桌面保留），防止切屏后对手势失效。
         applyZoomControls(desktopMode)
+        // 抽屉宽度与退后位移都按屏宽算，屏宽变了要重算并收起
+        drawerWidthPx = drawerWidth()
+        drawer.layoutParams.width = drawerWidthPx
+        drawer.requestLayout()
+        renderDrawer(0f)
         webView.reload()
     }
 
@@ -305,7 +402,8 @@ class MainActivity : Activity() {
         bar.visibility =
             if (state is EngineSupervisor.State.Installing || state is EngineSupervisor.State.Starting)
                 View.VISIBLE else View.GONE
-        statusBar.text = when (state) {
+        // 同一份状态文字同时喂导航栏与抽屉头部
+        val text = when (state) {
             is EngineSupervisor.State.Idle -> getString(R.string.status_idle)
             is EngineSupervisor.State.Installing -> getString(R.string.status_installing)
             is EngineSupervisor.State.Starting -> getString(R.string.status_starting)
@@ -333,13 +431,19 @@ class MainActivity : Activity() {
                 getString(R.string.status_idle)
             }
         }
+        statusBar.text = text
+        drawerStatus.text = text
     }
 
     override fun onBackPressed() {
-        // WebView 有历史则先回退，保持类原生浏览体验；
-        // 没有历史可退时**退到后台**，而不是结束任务（Termux 同款）。
+        // 抽屉开着时先收抽屉：不碰 WebView 历史，更不能改成 finish()。
+        // WebView 有历史则先回退，保持类原生浏览体验；没有历史可退时**退到后台**，而不是结束任务（Termux 同款）。
         // 区别很关键：结束任务会触发 EngineService.onTaskRemoved（= 用户显式退出：停引擎 + 收岛），
         // 而按返回键只是"离开界面"，引擎与流体云应当继续常驻。
+        if (drawerProgress > 0f) {
+            setDrawerOpen(false)
+            return
+        }
         if (webView.canGoBack()) webView.goBack() else moveTaskToBack(true)
     }
 
@@ -348,6 +452,7 @@ class MainActivity : Activity() {
         // 首启跳 Onboarding 时本 Activity 立即销毁，webView 尚未初始化——
         // lateinit 直接访问会崩（Android 11 新用户首启闪退实测）。
         uiScope.cancel()
+        drawerAnimator?.cancel()
         if (::webView.isInitialized) webView.destroy()
         super.onDestroy()
     }
@@ -374,6 +479,22 @@ class MainActivity : Activity() {
         private const val MIN_PAGE_SCALE = 50
         private const val MAX_PAGE_SCALE = 150
         private const val SCALE_STEP = 5
+
+        /** 抽屉：宽度占屏宽 78%；展开/收起 280ms，曲线 0.32,0.72,0,1（丝滑出场、无回弹） */
+        private const val DRAWER_WIDTH_RATIO = 0.78f
+        private const val DRAWER_DURATION_MS = 280L
+
+        /** 抽屉展开时内容层退后：缩到 88% + 右移 6% 屏宽；遮罩最深 28% 黑 */
+        private const val RECEDE_SCALE = 0.88f
+        private const val STAGE_SHIFT_RATIO = 0.06f
+        private const val SCRIM_ALPHA = 0.28f
+
+        /** 手指位移小于此值视为点击；松手时展开超过 35% 就吸附到打开 */
+        private const val DRAG_SLOP = 12f
+        private const val DRAWER_SNAP_RATIO = 0.35f
+
+        /** 网页底色：与 windowBackground 一致，避免加载前闪一下 */
+        private val WEBVIEW_BG = 0xFFF2F4F7.toInt()
 
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +

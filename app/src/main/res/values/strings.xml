@@ -13,9 +13,17 @@
     <string name="status_backoff">进程异常退出，%1$d 秒后自动重启（第 %2$d 次）</string>
     <string name="status_failed">启动失败：%1$s</string>
     <string name="btn_restart">重启</string>
-    <string name="btn_hide">隐藏</string>
     <string name="btn_back">← 主页</string>
     <string name="status_preview">预览模式 · 127.0.0.1:%1$d</string>
+
+    <!-- 导航栏 + 抽屉（浅色导航改版） -->
+    <string name="nav_menu">导航菜单</string>
+    <string name="drawer_logo">DS</string>
+    <string name="drawer_chat">对话</string>
+    <string name="drawer_chat_hint">底层常驻</string>
+    <string name="drawer_engine_address">访问地址 %1$s</string>
+    <string name="drawer_engine_version">版本 %1$s</string>
+    <string name="drawer_theme">主题：浅色（深色模式已禁用）</string>
     <string name="menu_title">设置选项</string>
     <string name="menu_landscape">横屏模式</string>
     <string name="menu_hide_toolbar">隐藏工具栏</string>
