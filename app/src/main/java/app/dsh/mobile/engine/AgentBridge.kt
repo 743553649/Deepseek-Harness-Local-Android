@@ -301,6 +301,7 @@ document.getElementById('api').textContent = checks.map(function(c){
      *   {"action":"set","title":"正在改 X","text":"可选","progress":60}
      *   {"action":"done","text":"可选"}                ← 常驻「✓ 完成」直到下一次任务开始
      *   {"action":"clear"}                             ← 撤掉 Agent 上报层，回到自动层
+     *   {"action":"active-session","sessionId":"..."}  ← 引擎插件上报"用户当前在用的会话"（只改项目名）
      * Android 16 以下没有这套 API → 返回 ok:false，调用方（island 命令）据此提示，不报错崩溃。
      */
     private fun island(ctx: Context, body: String): Pair<Int, String> {
@@ -321,6 +322,8 @@ document.getElementById('api').textContent = checks.map(function(c){
                 obj.optString("text").takeIf { it.isNotEmpty() },
                 if (obj.has("progress")) obj.optInt("progress") else null,
             )
+            // 用户当前在用的会话（v1.2.31）：岛上据此把项目名切到"你正在弄的那个"
+            "active-session" -> FluidCloud.setActiveSession(obj.optString("sessionId"))
             "done" -> FluidCloud.done(ctx, obj.optString("text").takeIf { it.isNotEmpty() })
             "clear" -> FluidCloud.clearAgent(ctx)
             else -> return 400 to """{"ok":false,"error":"unknown action"}"""

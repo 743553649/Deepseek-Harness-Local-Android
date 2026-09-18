@@ -217,6 +217,25 @@ class EngineSupervisor(private val ctx: Context) {
     }
 
     /**
+     * 等这次停引擎的收尾跑完，再执行 [action]（v1.2.31，给「退出」= 彻底退出用）。
+     *
+     * 为什么不能一上来就杀 App 进程：那样引擎是被 PTY 断开带走的，会话来不及落盘；
+     * 先在后台等 `stop()` 跑完（flush + 兜底强杀），再回来杀进程。
+     * 等待期间用户若又把 App 打开了，[action] 里会自己判断（见 EngineService.exitCompletely）。
+     *
+     * @param action 在**主线程**执行（调用方要做的是进程级动作）
+     */
+    fun onShutdownFinished(scope: CoroutineScope, action: () -> Unit) {
+        val pending = pendingShutdown
+        scope.launch(Dispatchers.IO) {
+            if (pending != null) {
+                runCatching { pending.get(SHUTDOWN_WAIT_SECONDS, TimeUnit.SECONDS) }
+            }
+            withContext(Dispatchers.Main) { action() }
+        }
+    }
+
+    /**
      * 热重启：完整走一遍 stop → start（TERM→KILL 优雅停止 + 监督循环重进）。
      * 与进程被杀后的自动退避不同，这是用户显式动作：退避计数天然从零开始，
      * guardian 的 Healthy 快照/计数不受影响。
