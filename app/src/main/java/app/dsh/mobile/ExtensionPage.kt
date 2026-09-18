@@ -62,8 +62,8 @@ class ExtensionPage(private val host: Activity) {
         refreshHeader()
     }
 
-    /** 每次切到本页时刷新计数（激活数可能被别处改过） */
-    fun onShown() = refreshHeader()
+    /** 每次切到本页整表重刷：计数可能被别处改过，行状态同理（详见 refreshAll） */
+    fun onShown() = refreshAll()
 
     fun onDestroy() {
         uiScope.cancel()
@@ -265,6 +265,16 @@ class ExtensionPage(private val host: Activity) {
         btn.setTextColor(host.getColor(if (primary) R.color.accent_on else R.color.muted))
     }
 
+    /**
+     * 整表重刷：每一行的按钮/状态都按磁盘上的真实状态重算一遍。
+     * 之所以要「整表」而不是只刷某一行 —— 安装收尾、切页面回来这些时刻，
+     * 谁也不知道哪一行停在了半截状态（用户实测：装完显示「已下载 · 未激活」却没有「激活」按钮）。
+     */
+    private fun refreshAll() {
+        items.forEach { refreshRow(it) }
+        refreshHeader()
+    }
+
     private fun refreshHeader() {
         val active = manager.activeCount()
         tvSubtitle.text = host.getString(
@@ -295,6 +305,11 @@ class ExtensionPage(private val host: Activity) {
                         onProgress = { p ->
                             host.runOnUiThread {
                                 val refs = rowRefs[ext.id] ?: return@runOnUiThread
+                                // 收尾（downloading.remove）之后晚到的回调一律不许再改这一行：
+                                // 按钮/进度的可见性只归 refreshRow 一个出口管。否则「下载完成」那次
+                                // 刷新把按钮刷出来后，一颗迟到的 0.95+ 进度回调会把按钮重新藏起来
+                                // —— 正好是「显示已下载未激活、却没有激活按钮」那个症状。
+                                if (ext.id !in downloading) return@runOnUiThread
                                 // 防御性自愈：refreshRow 的时序竞态可能把进度条设成 GONE，
                                 // 任何进度回调到达都强制恢复可见（visibility 只在此处维护）
                                 refs.progress.visibility = View.VISIBLE
@@ -317,6 +332,8 @@ class ExtensionPage(private val host: Activity) {
                         onStage = { stage ->
                             host.runOnUiThread {
                                 val refs = rowRefs[ext.id] ?: return@runOnUiThread
+                                // 同上：收尾后的迟到回调不许再动这一行
+                                if (ext.id !in downloading) return@runOnUiThread
                                 refs.progress.visibility = View.VISIBLE
                                 refs.action.visibility = View.GONE
                                 refs.stateText.text = stage
@@ -338,8 +355,8 @@ class ExtensionPage(private val host: Activity) {
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
                 }
-            refreshRow(ext)
-            refreshHeader()
+            // 刷整表（不是只刷这一行）：这是「激活按钮该出现了」的唯一收口
+            refreshAll()
         }
     }
 
