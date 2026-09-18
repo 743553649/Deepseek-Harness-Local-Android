@@ -131,6 +131,15 @@ gradle assembleDebug -Pabi=arm64-v8a
 
 **继续安装或开启高权限模式，即视为你已阅读、理解并接受上述全部条款。**
 
+## 📚 文档
+
+| 文档 | 给谁看 | 讲什么 |
+|---|---|---|
+| **本文件** | 使用者 | 产品说明、安装、FAQ |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 改代码的人 / Agent | 代码导航：哪个文件负责什么、引擎启动链路、端口与目录布局、四条数据流（含流体云上报）、CI 流水线、与上游的差异清单 |
+| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 改代码的人 / Agent | 踩坑记录（A~I 节，全部按「现象 → 根因 → 修法 → 验证」写）+ 折叠/展开字段对照表 + 真机验证配方 |
+| [`AGENTS.md`](AGENTS.md) | AI Agent | 仓库入口：硬约束、验证纪律、协作约定 |
+
 ## 反馈
 
 遇到问题或功能建议，欢迎提交 [Issue](https://github.com/743553649/Deepseek-Harness-Local-Android/issues)；崩溃类问题请附上 `logcat` 输出或应用内的引擎日志。

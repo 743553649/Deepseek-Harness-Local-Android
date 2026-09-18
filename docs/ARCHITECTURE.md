@@ -100,7 +100,8 @@ app/src/main/cpp/                     dsh_pty.c + CMakeLists.txt（原生 PTY）
 app/src/main/assets/
   ├── runtime.zip                     ★ 不入库，CI 的 collect-runtime 注入
   ├── runtime/MANIFEST.json           运行时版本与校验值
-  └── extensions/catalog.json         扩展中心清单
+  ├── extensions/catalog.json         扩展中心清单
+  └── fluid-cloud.mjs                 ★ 流体云引擎侧插件源码（启动时复制到 profiles/web/ 并替换端口占位符）
 scripts/
   ├── collect-termux-runtime.sh       CI 收集 Termux 运行时（慢的那步）
   ├── patch-apiproxy.py               运行时补丁
@@ -140,14 +141,14 @@ scripts/
 | `MainActivity.kt` | 397 | WebView 外壳 + 状态条 + 预览模式；Healthy 后用 `state.webUrl`（带 token）加载；**返回键 = `moveTaskToBack`（只退到后台，不停引擎）** | 改主界面 |
 | `ExtensionStoreActivity.kt` | 390 | 扩展中心 UI | 改扩展 UI |
 | `engine/EngineConfig.kt` | 445 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入**（含 `island` 命令、**流体云插件与补丁层**；插件源码在 `assets/fluid-cloud.mjs`，启动时复制并替换端口占位符） | 改端口 / 环境变量 / 注入脚本 |
-| `engine/AgentBridge.kt` | 405 | 环回 HTTP：通知 / 读屏 / 点击 / **`/island`（流体云三层上报）** / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
-| `engine/EngineSupervisor.kt` | 553 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启；**异步停止 / 停引擎收尾跑完才 spawn（pendingShutdown）/ 监督代际 epoch / 只按本轮日志判 EADDRINUSE** | 改启动/自愈逻辑 |
+| `engine/AgentBridge.kt` | 408 | 环回 HTTP：通知 / 读屏 / 点击 / **`/island`（流体云三层上报）** / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
+| `engine/EngineSupervisor.kt` | 572 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启；**异步停止 / 停引擎收尾跑完才 spawn（pendingShutdown）/ 监督代际 epoch / 只按本轮日志判 EADDRINUSE** | 改启动/自愈逻辑 |
 | `engine/ProfileGuardian.kt` | 308 | 自愈层：健康快照 / last-good 回滚 / 安全模式 | 改自愈策略 |
 | `engine/Privilege.kt` | 244 | NORMAL / SHIZUKU / ROOT 三模式探测与切换，dsh-home 保护 | 改权限模式 |
 | `OnboardingActivity.kt` | 232 | 首次启动引导 | 改引导流程 |
 | `engine/RuntimeInstaller.kt` | 208 | 安装 `assets/runtime.zip`（或 MANIFEST 远程包） | 改安装逻辑 |
 | `FluidCloud.kt` | 341 | **流体云状态岛**：三层优先级（Agent 上报 > 引擎忙碌 > 自动层）、过期回落、设置开关、岛通知即前台服务通知；折叠态文案 = `动作 空格 百分比`（v1.2.30 I3，动态拼不写死） | 改岛上显示什么 |
-| `service/EngineService.kt` | 375 | 前台服务：保活 + **岛自动层（状态一变立刻刷 + 5 秒轮询兜底，v1.2.30 I2）** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
+| `service/EngineService.kt` | 394 | 前台服务：保活 + **岛自动层（状态一变立刻刷 + 5 秒轮询兜底，v1.2.30 I2）** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
 | `engine/SessionWatcher.kt` | 111 | 会话活动探测（只 stat 文件拿「项目名 + 活跃项目数」，不解压不读内容） | 改岛的项目名来源 |
 | `src/test/.../SessionWatcherTest.kt` | 93 | SessionWatcher 的 JVM 单测（目录名解码 / 文件名版本差异 / 活跃窗口） | 改探测逻辑时同步补 |
 | `engine/EngineProcess.kt` | 204 | fork + exec 引擎进程（`--port` 在这里）；**扫描 stdout 捕获 `dsh web:` 入口** | 改启动参数 |
@@ -301,9 +302,10 @@ release（if: tag v*，needs: build-apk）
 
 ## 本 fork 相对上游的差异清单
 
-`git diff --stat upstream/main...HEAD` 实测为 **22 个文件**，便于将来 `git merge upstream/main` 时定位冲突。
+`git diff --stat upstream/main...HEAD` 实测为 **23 个文件**，便于将来 `git merge upstream/main` 时定位冲突。
 
 **本 fork 新增的文件**（上游没有，不会冲突，但别当成上游代码）：`FluidCloud.kt`（流体云状态岛）、
+`app/src/main/assets/fluid-cloud.mjs`（流体云引擎侧插件源码，v1.2.30 从 Kotlin 字符串挪出来）、
 `engine/SessionWatcher.kt`（会话活动探测）、`app/src/test/java/.../SessionWatcherTest.kt`（JVM 单测）、
 `docs/PITFALLS.md` 的 G/H/I 节、`docs/ARCHITECTURE.md` 的流体云段。
 

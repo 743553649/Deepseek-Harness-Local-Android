@@ -121,6 +121,15 @@ Alternatively, fork the repo and run the **android-build** workflow on GitHub Ac
 
 **Installing this app or enabling a high-privilege mode constitutes your acknowledgment that you have read, understood, and accepted all of the above.**
 
+## 📚 Documentation
+
+| Document | Audience | What is inside |
+|---|---|---|
+| **This file** | Users | Product overview, install, FAQ |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Contributors / agents | Code map: what each file owns, engine startup chain, ports and directories, the four data flows (incl. the fluid-cloud island), CI pipeline, diff vs upstream |
+| [`docs/PITFALLS.md`](docs/PITFALLS.md) | Contributors / agents | Pitfall log (sections A~I, each as symptom → root cause → fix → verification) plus real-device verification recipes |
+| [`AGENTS.md`](AGENTS.md) | AI agents | Repo entry point: hard constraints, verification discipline, collaboration rules |
+
 ## Feedback
 
 Found a bug or have a feature request? Open an [Issue](https://github.com/743553649/Deepseek-Harness-Local-Android/issues). For crash reports, please attach the `logcat` output or the engine log available in the app.
