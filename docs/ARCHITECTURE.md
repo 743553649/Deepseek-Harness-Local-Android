@@ -42,7 +42,7 @@
 | 4 | `engine/EngineSupervisor.kt` | **核心状态机**：`Idle → Installing → Starting → Healthy(port)`，失败走 `Backoff → Failed`；spawn 之前先等上一次停引擎的收尾跑完（v1.2.30 I1 —— `stop()` 的强杀走全局 PTY 句柄，新引擎先起来会被打死） |
 | 5 | `engine/RuntimeInstaller.kt` | Installing 阶段：解压 `assets/runtime.zip` 到 `filesDir/engine`，恢复可执行位 |
 | 6 | `engine/EngineConfig.kt` | 组装子进程环境变量（PATH / LD_LIBRARY_PATH / DSH_HOME / 端口常量…） |
-| 7 | `engine/EngineProcess.kt` | **fork + exec**：`node --expose-internals <dsh bin.js> web --no-open --port <n>`（ROOT 模式下外层套 `su -c`）。⚠️ **带补丁时必须换形式**：`--patch <file> --profile web --no-open --port <n>` —— `web` 子命令显式拒收父级 `--patch`，照原样下会**引擎不启动**（详见 `EngineProcess.kt` 里的注释与提交 `133682e`） |
+| 7 | `engine/EngineProcess.kt` | **fork + exec**：`node --expose-internals <dsh bin.js> web --no-open --port <n>`（ROOT 模式下外层套 `su -c`） |
 | 8 | `engine/Pty.kt` + `cpp/dsh_pty.c` | 原生 PTY，让引擎进程有终端（日志双写 logcat + `engine/engine.log`） |
 | 9 | `EngineSupervisor.pollHealth()` + `awaitWebUrl()` | 轮询 `http://127.0.0.1:<port>/` 直到**有响应**（判定区间 `200..499` —— 0.1.5 的 401 也算，这是"假就绪"的来源，见「WebUI 会话认证」）→ 再等 stdout 打印 `dsh web: <url>`（带 token，最多 15s）→ 发布 `Healthy(port, webUrl)` |
 | 10 | 同 4 | Healthy 后启动 `AgentBridge`；Shizuku 模式下启动 `ShizukuHttpBridge` |
@@ -67,15 +67,14 @@ files/
 ├── engine/                    运行时根（升级时整体替换，绝不动 dsh-home）
 │   ├── bin/node               引擎本体（bionic 编译的 Node）
 │   ├── bin/{bash,rg,curl,pnpm,...}
-│   ├── bin/{notify,scr,island,psx,killx,shz,su}   ← 运行时注入的闸门包装器（island = 流体云上报）
+│   ├── bin/{notify,scr,curl,psx,killx,shz,su}   ← 运行时注入的闸门包装器
 │   ├── lib/node_modules/@deepseek-ai/dsh/lib/bin.js   ← 引擎入口
 │   ├── lib/                   动态库（LD_LIBRARY_PATH）
 │   ├── etc/tls/cert.pem       CA 证书
 │   ├── extensions/<id>/       ← 扩展中心安装的环境（git/python/jdk…）
 │   └── engine.log             ★ 引擎日志在这里（不在 files/ 根）
 ├── dsh-home/                  $DSH_HOME —— 用户资产
-│   ├── profiles/              插件/配置 YAML（profiles/web/fluid-cloud.mjs 是 App 每次启动从 assets 复制过来的流体云插件）
-│   ├── .android-fluid-cloud.patch.yml   ← 流体云插件的 --patch 补丁层（App 每次启动重写）
+│   ├── profiles/              插件/配置 YAML
 │   ├── profiles.last-good/    ProfileGuardian 的健康快照
 │   ├── sessions/              会话数据
 │   ├── storages/              工具状态
@@ -100,8 +99,7 @@ app/src/main/cpp/                     dsh_pty.c + CMakeLists.txt（原生 PTY）
 app/src/main/assets/
   ├── runtime.zip                     ★ 不入库，CI 的 collect-runtime 注入
   ├── runtime/MANIFEST.json           运行时版本与校验值
-  ├── extensions/catalog.json         扩展中心清单
-  └── fluid-cloud.mjs                 ★ 流体云引擎侧插件源码（启动时复制到 profiles/web/ 并替换端口占位符）
+  └── extensions/catalog.json         扩展中心清单
 scripts/
   ├── collect-termux-runtime.sh       CI 收集 Termux 运行时（慢的那步）
   ├── patch-apiproxy.py               运行时补丁
@@ -137,7 +135,7 @@ scripts/
 | 文件 | 行数 | 职责 | 什么时候会改它 |
 |---|---|---|---|
 | `engine/ExtensionManager.kt` | 767 | 扩展中心：Termux 仓库实时安装（索引 → 依赖闭包 → .deb → 解包 → 原子发布） | 改扩展机制 |
-| `MainActivity.kt` | 752 | **主界面 = 四页合一的容器**：WebView 外壳 + 底栏玻璃导航（对话/扩展/设置/关于）+ 顶部状态胶囊 + 加载页时机；Healthy 后用 `state.webUrl`（带 token）加载；**返回键：非对话页 = 回对话页，对话页 = `moveTaskToBack`（只退到后台，不停引擎）**；**全屏**（覆盖状态栏，内容由 `applyStatusBarInset` 下移一个状态栏高度；**键盘由 `applyImeInset` 顶上去**） | 改主界面 / 导航 |
+| `MainActivity.kt` | 752 | **主界面 = 四页合一的容器**：WebView 外壳 + 底栏玻璃导航（对话/扩展/设置/关于）+ 加载页时机；Healthy 后用 `state.webUrl`（带 token）加载；**返回键：非对话页 = 回对话页，对话页 = `moveTaskToBack`（只退到后台，不停引擎）**；**全屏**（覆盖状态栏，内容由 `applyStatusBarInset` 下移一个状态栏高度；**键盘由 `applyImeInset` 顶上去**） | 改主界面 / 导航 |
 | `SettingsPage.kt` | 470 | 设置页逻辑（引擎卡片 / 显示 / 权限模式 / 无障碍）；**重启引擎走 `supervisor.restartAsync()`** | 加设置项 |
 | `ExtensionPage.kt` | 395 | 扩展中心 UI（列表行是代码拼的，**保留官方品牌图标做法**） | 改扩展 UI |
 | `AboutPage.kt` | 35 | 关于页（项目信息 / 版本 / 开源地址） | 改关于页 |
@@ -145,17 +143,14 @@ scripts/
 | `GlassSpinner.kt` | 105 | 启动页自绘转圈（淡色轨道 + 250° 主色渐变圆弧） | 改启动动画 |
 | `GlassProgress.kt` | 115 | 启动页自绘进度条（胶囊轨道 + 渐变；null = 来回扫） | 改启动动画 |
 | `Motion.kt` | 21 | 「减少动态效果」（`ANIMATOR_DURATION_SCALE == 0`）判定的唯一入口，所有动画先过它 | 加动画时 |
-| `engine/EngineConfig.kt` | 445 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入**（含 `island` 命令、**流体云插件与补丁层**；插件源码在 `assets/fluid-cloud.mjs`，启动时复制并替换端口占位符） | 改端口 / 环境变量 / 注入脚本 |
-| `engine/AgentBridge.kt` | 408 | 环回 HTTP：通知 / 读屏 / 点击 / **`/island`（流体云三层上报）** / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
+| `engine/EngineConfig.kt` | 445 | **目录拓扑 + 端口常量 + 子进程环境 + 闸门包装器注入** | 改端口 / 环境变量 / 注入脚本 |
+| `engine/AgentBridge.kt` | 408 | 环回 HTTP：通知 / 读屏 / 点击 / 扩展 API / `/diag` 自诊断 | 加原生能力给 AI |
 | `engine/EngineSupervisor.kt` | 572 | 状态机 + 健康检查 + **等 WebUI 入口（token）** + 退避重启；**异步停止 / 停引擎收尾跑完才 spawn（pendingShutdown）/ 监督代际 epoch / 只按本轮日志判 EADDRINUSE** | 改启动/自愈逻辑 |
 | `engine/ProfileGuardian.kt` | 308 | 自愈层：健康快照 / last-good 回滚 / 安全模式 | 改自愈策略 |
 | `engine/Privilege.kt` | 244 | NORMAL / SHIZUKU / ROOT 三模式探测与切换，dsh-home 保护 | 改权限模式 |
 | `OnboardingActivity.kt` | 232 | 首次启动引导 | 改引导流程 |
 | `engine/RuntimeInstaller.kt` | 208 | 安装 `assets/runtime.zip`（或 MANIFEST 远程包） | 改安装逻辑 |
-| `FluidCloud.kt` | 341 | **流体云状态岛**：三层优先级（Agent 上报 > 引擎忙碌 > 自动层）、过期回落、设置开关、岛通知即前台服务通知；折叠态文案 = `动作 空格 百分比`（v1.2.30 I3，动态拼不写死） | 改岛上显示什么 |
-| `service/EngineService.kt` | 394 | 前台服务：保活 + **岛自动层（状态一变立刻刷 + 5 秒轮询兜底，v1.2.30 I2）** + `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
-| `engine/SessionWatcher.kt` | 111 | 会话活动探测（只 stat 文件拿「项目名 + 活跃项目数」，不解压不读内容） | 改岛的项目名来源 |
-| `src/test/.../SessionWatcherTest.kt` | 93 | SessionWatcher 的 JVM 单测（目录名解码 / 文件名版本差异 / 活跃窗口） | 改探测逻辑时同步补 |
+| `service/EngineService.kt` | 394 | 前台服务：保活 + 引擎状态通知（`NOTIF_ID`，带「退出」按钮）+ `onTaskRemoved`（划掉=退出）+ `START_NOT_STICKY` | 改保活 / 退出与通知行为 |
 | `engine/EngineProcess.kt` | 204 | fork + exec 引擎进程（`--port` 在这里）；**扫描 stdout 捕获 `dsh web:` 入口** | 改启动参数 |
 | `DshAccessibilityService.kt` | 153 | 无障碍服务（模拟点击/滑动） | 改读屏点击 |
 | `engine/AgentContextSeed.kt` | 161 | 生成并**增量同步** `$DSH_HOME/AGENTS.md`：静态模板靠 `SEED_VERSION` 升级覆盖，动态行（已激活扩展 / 特权模式 / shz）每次启动就地同步 | 改环境事实说明 |
@@ -164,7 +159,7 @@ scripts/
 
 ---
 
-## 四条重要的数据流
+## 三条重要的数据流
 
 ### 运行时安装（`RuntimeInstaller`）
 
@@ -218,41 +213,11 @@ WebView.loadUrl(webUrl)
 - **健康检查会"假就绪"**：`pollHealth` 的判定区间是 `200..499`，0.1.5 的 401 正落在里面，
   于是"HTTP 服务器已监听"被当成"WebUI 可用"，而 WebView 其实只会黑屏。
   **就绪 ≠ 可用**，详见 `docs/PITFALLS.md` G8。
-- **token 是进程级的**：引擎重启就换新的；`MainActivity` 的「预览返回」按钮特意走
-  `healthyWebUrl` 重取一次（会话 cookie 可能已过期，重走 token 链换新）。
+- **token 是进程级的**：引擎重启就换新的，重进对话页必须重取一次 `healthyWebUrl`
+  （会话 cookie 可能已过期，重走 token 链换新）—— `MainActivity` 加载对话页时统一走这里，
+  v1.2.44 删掉预览返回胶囊后不再有单独的「预览返回」按钮（见 `docs/PITFALLS.md` J7）。
 - **旧引擎兼容**：0.1.1 打印同一行但不带 token，走同一条通路后等价于裸 URL，行为不变 ——
   所以这套适配对新旧引擎都安全。
-
----
-
-### 流体云状态上报（v1.2.27+，`FluidCloud`）
-
-```
-引擎进程内插件 profiles/web/fluid-cloud.mjs（源码在 assets/fluid-cloud.mjs，App 每次启动复制并注入 --patch）
-  ├─ 订阅 agent/status（running/idle）→ POST 127.0.0.1:3183/island {"action":"status",...}
-  ├─ 订阅 api-session/activity + 取 agent/status 的 payload.agent.id（就是 SessionId）
-  │    → POST {"action":"active-session"}：告诉 App"用户此刻在用哪个会话"（v1.2.31，岛上的项目名据此选）
-  └─ 每 3 秒把 sessions/<项目>/、<项目>/<会话>/ chmod 0755，
-     以及 storages/ 0755 + storages/workspace.json 0644（App 要读这张表做"会话 id → 项目名"）
-         （root 模式下引擎以 uid 0 建的文件是 0700/0600，App 进程读不到 → 岛上项目名会退化）
-        ↓
-AgentBridge POST /island → FluidCloud 三层优先级
-        ① Agent 显式上报（island set/done；引擎空闲且 10 分钟无更新则回落自动层）
-        ② 引擎忙碌态（插件上报的 running/idle）
-        ③ 自动层（EngineService 写：项目名 + 就绪·工作中·启动中·引擎异常；**状态一变立刻写 + 5 秒轮询兜底**）
-           项目名优先取"当前在用的会话"（SessionWatcher.projectOfSession 读 storages/workspace.json），
-           取不到才回落到"最近有写入的项目 / N 个项目"
-        ↓
-NotificationManager.notify(4242, ProgressStyle + setShortCriticalText + extras["android.requestPromotedOngoing"])
-        ↓
-ColorOS 16 流体云胶囊（该通知**同时就是 EngineService 的前台服务通知** —— 进程被杀由系统撤掉）
-```
-
-- 设置页「流体云状态岛」开关（`dsh_ui/island_enabled`）关掉 → 退回普通前台通知，**不重启引擎**。
-- 无通知权限 / 系统不支持时同样退回普通前台通知（否则岛会卡在首帧「启动中」）。
-- 折叠态只显示：左 = 小图标，右 = `shortCriticalText`（就绪/工作中/45%）；标题与进度条正文只在**展开态**可见。
-- 「退出」的语义（v1.2.31）：停引擎 → 收岛 → 停服务 → **等引擎优雅停完再杀掉 App 进程**（用户要求"退出就是退出"）。
-- 判定与验证配方见 `docs/PITFALLS.md` H 节（已修项）与 **I 节**（I1~I6 + 折叠/展开字段对照表）。
 
 ---
 
@@ -309,10 +274,9 @@ release（if: tag v*，needs: build-apk）
 
 `git diff --stat upstream/main...HEAD` 实测为 **23 个文件**，便于将来 `git merge upstream/main` 时定位冲突。
 
-**本 fork 新增的文件**（上游没有，不会冲突，但别当成上游代码）：`FluidCloud.kt`（流体云状态岛）、
-`app/src/main/assets/fluid-cloud.mjs`（流体云引擎侧插件源码，v1.2.30 从 Kotlin 字符串挪出来）、
-`engine/SessionWatcher.kt`（会话活动探测）、`app/src/test/java/.../SessionWatcherTest.kt`（JVM 单测）、
-`docs/PITFALLS.md` 的 G/H/I 节、`docs/ARCHITECTURE.md` 的流体云段。
+**本 fork 新增的文件**（上游没有，不会冲突，但别当成上游代码）：`docs/PITFALLS.md`（A~J 节）、
+`docs/ARCHITECTURE.md`、`docs/UI-REDESIGN.md` 三份文档，以及界面改版那批 Kotlin 文件
+（`SettingsPage.kt` / `AboutPage.kt` / `GlassSwitch.kt` / `GlassSpinner.kt` / `GlassProgress.kt` / `Motion.kt`）。
 
 **与上游同名但已改动的文件**：
 

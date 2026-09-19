@@ -19,9 +19,9 @@
 | **F** | 网络（国内、无代理；加速站） | 2 |
 | **附** | x86_64 产物真机装不上 | — |
 | **G** | 上游 dsh 引擎升级（0.1.1-rc.2 → 0.1.5-rc.1） | 12 |
-| **H** | 流体云状态岛（ColorOS 16 / Android 16）**已修 H1~H9** | 9 |
-| **I** | 流体云 v1.2.30~v1.2.32 修掉的 **I1~I6** + 折叠/展开字段对照表 + 真机验证配方 | 7 |
-| **J** | 界面改版 v1.2.36~v1.2.44 修掉的 **J1~J6**（全屏 / 底栏 / 切页 / 键盘遮挡） | 6 |
+| **H** | 前台服务 / 通知 / 退出链路（保活、通知身份、停引擎的竞态） | 5 |
+| **I** | 退出与停引擎 v1.2.30~v1.2.32 修掉的 **I1、I6** + 真机验证配方 | 3 |
+| **J** | 界面改版 v1.2.36~v1.2.44 修掉的 **J1~J7**（全屏 / 底栏 / 切页 / 键盘遮挡 / 胶囊删除） | 7 |
 
 > 新增条目前先看对应节：**已修的进 H/I/J（写清验证方式）**，别再往「待修清单」里堆。
 
@@ -531,57 +531,36 @@
 
 ---
 
-## H. 流体云状态岛（ColorOS 16 / Android 16）
-
-### H1. ★Root 模式下引擎写的会话目录 App 读不到 → 岛上的「项目名」退化
-
-- **现象**：岛上长期只显示「DSH · 就绪」，看不到「开发 · 就绪」这类项目名；
-  而把 `$DSH_HOME/sessions/**` 手动 `chown` 给 App 后，6 秒内标题就变回项目名。
-- **根因**：Root 模式下引擎以 **uid 0** 运行，它新建的会话目录是 `drwx------ root root`（0700），
-  而 App 界面进程是 **uid 10491** —— `SessionWatcher`（跑在 App 进程里）读不进去，
-  `project.listFiles()` 返回 null → 该项目被跳过 → 标题退回 `DSH`。
-  注意这不是测试残渣：**引擎每次开新会话都会产生这样的目录**，所以会反复出现。
-- **为什么之前"看起来是好的"**：上个会话清理现场时把那些目录 chown 给了 App，
-  于是一段时间内能正常显示 —— 属于巧合，不是真实状态。
-- **修法（v1.2.28）**：让**引擎侧插件**（`fluid-cloud.mjs`，跑在 root 的引擎进程里）
-  把 `sessions/<项目>/` 与 `sessions/<项目>/<会话>/` **两级目录** `chmod 0755`；
-  每 3 秒一次 + 每次 `agent/status` 事件一次。
-  App 只做 `list` + `stat`（`SessionWatcher` 明确"不解压不读内容"），
-  所以**文件本身保持 0600 不用动**，安全面不变（父目录仍是 App 私有的 0700）。
-- **验证**：以 App 身份实测 —— 改权限前 `su 10491 -c "ls <项目目录>"` → `Permission denied`；
-  改后能列出会话目录、能 `stat` 到 `session*.zstd` 的 mtime；岛上标题 6 秒内变为项目名。
-- **通用教训**：**跨 uid 的"只读对方数据"要按最小权限设计**：
-  先问清楚"我到底需要目录的什么"（这里是"列目录 + stat 文件 mtime"），
-  往往只需要目录的执行/读位，不必把文件本身也开放。
+## H. 前台服务 / 通知 / 退出链路（保活、通知身份、停引擎的竞态）
 
 ### H2. ★★普通 ongoing 通知不随进程死亡消失；`START_STICKY` 还会让 App 自己复活
 
-- **现象（用户反馈）**：手动把 Dev 版 App 杀掉后，流体云胶囊和通知栏那条通知都还在。
+- **现象（用户反馈）**：手动把 Dev 版 App 杀掉后，通知栏那条常驻通知还在。
 - **根因（实测两段，缺一不可）**：
-  1. 岛通知原来是**普通通知** + `setOngoing(true)`：Android 只保证"用户划不掉"，
-     **不保证进程死后撤掉** —— 它就此变成点不掉的僵尸胶囊；
+  1. 那条常驻通知原来是**普通通知** + `setOngoing(true)`：Android 只保证"用户划不掉"，
+     **不保证进程死后撤掉** —— 它就此变成点不掉的僵尸通知；
      只有**前台服务通知**（`startForeground` 的那条）才由系统托管、随进程死亡被撤。
   2. 更主要的一条：`EngineService` 返回 `START_STICKY`，前台服务被杀后**系统会立刻把它拉起来**
-     → 引擎重新启动 → 岛又被贴回来。实测：`kill -9 <app pid>` 后 6 秒内进程 PID 已变
+     → 引擎重新启动 → 通知又被贴回来。实测：`kill -9 <app pid>` 后 6 秒内进程 PID 已变
      （8051 → 18958）、`engine.log` 多出一条 `---- engine start ----`、
      通知的 `when` 是**新发**的时间戳（不是旧通知没撤）。
 - **修法（v1.2.28）**：
-  1. 岛通知**就当前台服务通知**（`EngineService.startAsForeground` 用 `FluidCloud.NOTIF_ID`
-     和 `FluidCloud.foregroundNotification()`；后续更新仍是同一个 id → 保持前台服务身份）。
-     ⚠️ `startForeground` 要求渠道**已存在**，所以建渠道必须提前到 `foregroundNotification()` 里，
-     不能只在 `post()` 里建。
+  1. 引擎状态通知**就当前台服务通知**（`EngineService.startAsForeground()` 用 `NOTIF_ID`；
+     后续 `updateNotification()` 仍是同一个 id → 保持前台服务身份）。
+     ⚠️ `startForeground` 要求渠道**已存在**，所以建渠道必须提前到 `createChannel()` 里，
+     不能等到通知更新时才建。
   2. `START_STICKY` → **`START_NOT_STICKY`**：用户杀掉就停，不自我复活。
   3. 加 `onTaskRemoved()` → 与通知栏「退出」按钮同一个出口
-     （收岛 + 停引擎 + `stopSelf`）。
+     （停引擎 + `stopSelf`）。
   4. `MainActivity.onBackPressed` 在 WebView 无历史时改走 **`moveTaskToBack(true)`**：
-     返回键只是"离开界面"（任务留在最近任务里 → `onTaskRemoved` 不触发 → 引擎与岛继续常驻），
+     返回键只是"离开界面"（任务留在最近任务里 → `onTaskRemoved` 不触发 → 引擎与通知继续常驻），
      只有**从最近任务划掉 / 强制停止**才算显式退出。
      ⚠️ 不改这里的话，返回键会 finish 掉唯一的 Activity → 任务被移除 → `onTaskRemoved` →
      引擎被停（用户明确不要这个行为）。
-- **顺序坑**：`exitCompletely()` 必须**先** `stopForeground(STOP_FOREGROUND_REMOVE)` **再** `hide()`；
-  反过来的话，`cancel()` 的对象仍被前台服务持有 → 系统忽略 → 岛撤不掉。
+- **顺序坑**：`exitCompletely()` 必须**先** `stopForeground(STOP_FOREGROUND_REMOVE)` **再**撤通知 / `stopSelf()`；
+  反过来的话，`cancel()` 的对象仍被前台服务持有 → 系统忽略 → 通知撤不掉。
 - **验证**：杀进程后进程/引擎/通知三者应同时消失；从最近任务划掉后同样；
-  `dumpsys notification` 里 `id=4242` 应再无记录、且 `flags` 含 `FOREGROUND_SERVICE`。
+  `dumpsys notification` 里 `id=42` 应再无记录、且 `flags` 含 `FOREGROUND_SERVICE`。
 
 ### H3. ★★在 Service 回调里同步停引擎 → ANR（引擎优雅退出要 8 秒）
 
@@ -629,17 +608,17 @@
   所以"每改一行就要下 118MB"是这条流程的固有成本，日常小改可先用
   「CI 绿 + 解 dex 做二进制层检查」，只在需要真机验证时才下载。
 
-### H4. ★★把「异步停引擎」写成整个 stop() 丢后台 → 竞态：岛上永远停在「启动中」
+### H4. ★★把「异步停引擎」写成整个 stop() 丢后台 → 竞态：新引擎无人监督、界面永远「启动中」
 
 - **现象**（H3 的修法引入的新 bug，真机实测）：停服务后立刻重新打开 App，
-  引擎**明明在跑**（3180 有响应、node 进程在），但岛上一直显示「DSH · 启动中」，
-  监督器像"躺平"了一样不再更新状态。
+  引擎**明明在跑**（3180 有响应、node 进程在），但界面一直盖着「正在启动引擎…」的加载页
+  （进不了对话页），监督器像"躺平"了一样不再更新状态。
 - **根因**：H3 的修法把 **整个** `EngineSupervisor.stop()` 丢到后台线程。而 `stop()` 里
   发完 TERM 后会 **阻塞约 8 秒**等引擎死，然后才执行 `process = null` + `state = Stopped`。
   于是出现窗口期：用户在这 8 秒内重开 App → 新的监督循环已经起来并成功拉起引擎，
   **迟到的 stop() 才回来** → 它把 `loopJob`（新循环）cancel 掉、把 `process` 清空、
   把状态打回 `Stopped` → 新循环死掉、引擎无人监督、状态再也不更新
-  （`Stopped` 在岛上映射到 `else` 分支 = 「启动中」）。
+  （`Stopped` 不是 `Healthy` → 加载页一直盖着 = 「正在启动引擎…」）。
 - **修法（v1.2.28）**：
   1. **状态变更与阻塞等待彻底分离** —— 新增 `EngineSupervisor.stopAsync()`：
      `userStop/loopJob/process/state` 的变更**同步立即完成**；后台协程只对
@@ -649,8 +628,8 @@
      `loopJob.cancel()` 只能取消挂起点，而 `exitFuture.get()` 是阻塞不可取消的 ——
      旧循环会一直等到引擎退出才返回，那时 `userStop` 可能已被新一轮 start() 置回 false，
      旧循环就会继续往下走：写回 `Backoff`、甚至**再拉起一个引擎抢 3180**。
-- **验证**：`am stopservice` → **立刻**（2 秒内）`am start MainActivity` → 岛上应恢复正常
-  （项目名 · 就绪/工作中），且**只有一个** dev 引擎 node；`engine.log` 里不该出现两轮
+- **验证**：`am stopservice` → **立刻**（2 秒内）`am start MainActivity` → 界面应恢复正常
+  （加载页退场、进入对话页），且**只有一个** dev 引擎 node；`engine.log` 里不该出现两轮
   连续 `engine start`。修复前该场景稳定复现「永远启动中」。
 
 ### H5. ★★EADDRINUSE「清孤儿」是死代码；且它的清除模式会误杀官方版引擎
@@ -679,41 +658,6 @@
   `EADDRINUSE: killed orphan engine node(s) of app.dsh.mobile.dev`，且**官方版引擎 PID 不变**；
   随后只应有 **1 个** dev 引擎进程（`ps` 核对）。
 
-### H6. ★Agent 忘了调 `island done` → 岛上一直挂着过期进度（需要 TTL 回落）
-
-- **现象**：Agent 用 `island set "正在改 X" 60` 报了进度后没有收尾，任务早就结束了，
-  岛上仍长期显示「正在改 X · 60%」——**岛上在说谎**，用户以为还在跑。
-- **根因**：三层优先级里 Agent 层的清除时机只有"下一次任务开始"（`agent/status=running`）
-  和显式 `island clear/done`。Agent 漏调就永远没人清（实测确认无任何自动回落）。
-  设计上「✓ 完成」需要常驻（那是刻意的），但**进行中的进度**不该无限期挂着。
-- **修法（v1.2.28）**：`FluidCloud.expireStaleAgent()`，由 EngineService 的 5 秒自动层轮询调用：
-  **引擎空闲 + 距上次 Agent 上报超过 10 分钟** → 撤掉 Agent 层回落到自动层。
-  `report()`/`done()` 记录单调时钟；「✓ 完成」用 `agentIsDone` 标记排除在过期之外。
-- **验证**：`island set "TTL 过期测试" 66` 后干等 10 分钟（引擎空闲）→ 岛上应自动回到
-  「项目名 · 就绪」；期间若跑任务或再上报则不回落（有更新就续期）。
-
-### H7. 开关与"无权限"的边界：岛通知既是前台服务通知，就有一条容易踩的路径
-
-- **背景**：v1.2.28 起岛通知**就是**前台服务通知（H2）。于是"用户关掉流体云"和
-  "系统不支持/没权限"都必须能干净地退回普通前台通知，否则服务会没有合法通知可用。
-- **坑（合并时引入、本次修掉）**：Android 13+ 若没授予 `POST_NOTIFICATIONS`，
-  `notify()` 会被系统丢弃，而 `startForeground()` 的首帧通知**已经贴出去了** →
-  岛会**永久停在「DSH · 启动中」**（内容再也更新不了）。
-  → 修法：`EngineService.useIslandNotification()` 三条件缺一不可
-  （系统支持 + 用户开关开 + 有通知权限）；不满足就退回老的引擎状态通知。
-- **开关实现要点（设置页「流体云状态岛」）**：
-  1. 偏好放 `dsh_ui`，key `island_enabled`（默认开）；
-     常量由 `FluidCloud.PREFS_UI/KEY_ISLAND_ENABLED` 提供，避免多处字面量。
-  2. 切换后**不重启引擎** —— 只发 `ACTION_REFRESH_NOTIFICATION` 让服务重挂通知；
-     `EngineService.refreshNotificationIfRunning()` 在**服务没跑时什么都不做**，
-     否则"改个开关"会把引擎拉起来（用户会莫名看到引擎启动）。
-  3. `startAsForeground()` 换风格时顺手 `cancel` 另一条 id，避免留下两条常驻通知。
-  4. 系统不支持（< Android 16）时设置页整行置灰，不给一个点了没反应的开关。
-  5. `/island` 在开关关闭时明确回 `ok:false`，别让 Agent 以为"设置了但没人看见"。
-- **验证**：偏好写 `false` → 重启 App → 应**只有** `id=42` 的「DSH 引擎运行中」普通通知，
-  `id=4242` 与 `PROMOTED_ONGOING` 都不出现；写回 `true` → 岛回来。
-  撤掉 `POST_NOTIFICATIONS` 后重启 → 岛上不该出现任何卡住的内容。
-
 ### H5 补充：EADDRINUSE 判定还必须**只看本轮新增日志**
 
 - 修掉"哈希 vs 字符串"之后还有个坑：日志是**追加**的，旧一轮失败留下的 `EADDRINUSE`
@@ -726,14 +670,14 @@
 
 ---
 
-## I. 流体云 · v1.2.30~v1.2.32 修掉的问题（I1~I6）与界面事实
+## I. 退出与停引擎 · v1.2.30~v1.2.32 修掉的问题（I1、I6）与真机验证配方
 
-> 本节原本是「下一轮开工清单」。三项已在 **v1.2.30** 修完并真机验证，现按
-> 「现象 → 根因 → 修法 → 验证」归档，供以后回看。上一轮已修项见 H1~H7。
+> 本节原本是「下一轮开工清单」。已在 **v1.2.30~v1.2.32** 修完并真机验证，现按
+> 「现象 → 根因 → 修法 → 验证」归档，供以后回看。前台服务与通知那一组见 H2~H5。
 
 ### I1. ★退出后 ~8 秒内重开 App → 新引擎被杀 / 撞 EADDRINUSE（v1.2.30 已修）
 
-- **现象**（用户实测）：点通知栏「退出」后立刻打开 App，顶部显示「进程异常退出…N 秒后自动重启（第 1 次）」，
+- **现象**（用户实测）：点通知栏「退出」后立刻打开 App，加载页显示「进程异常退出…N 秒后自动重启（第 1 次）」，
   约 3 秒后第二次启动才成功。
 - **根因**（v1.2.30 真机日志对时，比初判深一层）：
   - 表层：H3 把「退出」时的停引擎改成**后台异步**（为了修 ANR），而引擎优雅退出要几秒，
@@ -765,93 +709,7 @@
     `previous engine shutdown finished after 6746ms; spawning new one`（第二轮 6901ms）
   - 本轮新增的 `engine.log` 里 `EADDRINUSE` **0 次**（修前必现）
   - `logcat -b events | grep am_anr` **0 条**（没有把 ANR 修回来）
-  - 重开后约 18 秒岛变「就绪」（修前是弹「进程异常退出」+ 更久的折腾）
-
-### I2. 引擎就绪后岛上仍可能显示「启动中」最多 5 秒（v1.2.30 已修）
-
-- **现象**（用户实测）：引擎明明已就绪，折叠态胶囊**有时**还显示「启动中」，观感"不稳定"。
-- **根因**：岛上文案由 `EngineService.startIslandLoop()` **每 5 秒**轮询 `supervisor.state.value`
-  后写入；状态从 `Starting` → `Healthy` 的瞬间不会立刻反映。
-- **修法**：把「算一次自动层文案并写岛」抽成 `applyIslandAuto()`，由**两处**调用 ——
-  监督器状态收集回调（状态一变立刻刷岛）+ 5 秒轮询（降级为兜底：会话树变化、
-  Agent 层过期回落这类状态之外的变化）。`FluidCloud.setAuto` 自带幂等去重，重复调用无副作用。
-- **怎么验（已实测）**：跑完 I1 的重开流程，盯 `engine healthy on :3180` 的出现时刻与
-  胶囊变「就绪」的时刻：实测 08:28:27.536 引擎 healthy，同一秒（+18054ms 采样点）胶囊已是「就绪」，
-  **< 1 秒**（修前最长要等满 5 秒）。
-
-### I3. 折叠态看不到"Agent 在干什么"（字段放错了位置，v1.2.30 已修）
-
-- **现象**（用户实测）：Agent `island set "整理会话" 77` 后，**折叠态只有一条进度线 + 77%**，
-  看不出这条进度是关于什么的；展开后才能在左侧看到动作名。
-- **根因（界面事实，务必记住）**：
-
-  | 我们设置的字段 | 折叠态（胶囊） | 展开态（面板） |
-  |---|---|---|
-  | `setSmallIcon` | ✅ 左侧小图标 | ✅ 右侧应用图标 |
-  | `setShortCriticalText` | ✅ 右侧状态词 | ✅ |
-  | `ProgressStyle`（有百分比=真实进度条；无=不确定进度） | ✅ 那条**横线** | ✅ 中部 |
-  | `setContentTitle`（项目名 / **Agent 动作**） | ❌ 不显示 | ✅ 左侧 |
-  | `setContentText`（Agent 附带说明） | ❌ 不显示 | ✅ 正文 |
-  | `addAction`「退出」 | ❌ 不显示 | ✅ 底部 |
-
-  → 动作名原本放在 `title`，所以折叠态看不到。（另：本机"不确定进度"渲染成**横线**，
-  **不是转圈** —— 这也解释了「从没见过转圈图标」。）
-- **修法**：Agent 报进度时把动作名写进 `shortCriticalText`，格式按用户定稿：
-  **`动作 空格 百分比`**（如 `整理会话 77%`）；没有百分比时只显示动作名本身，不补固定词。
-  `title` 仍保留完整动作给展开态。
-  ⚠️ **文案必须动态拼，禁止硬编码**：动作名来自 Agent 上报、百分比来自进度值，
-  代码与资源里只有一份格式模板 `island_action_progress`（`%1$s %2$d%%`），
-  不出现任何具体动作名或数字。
-- **怎么验（已实测）**：
-  ```bash
-  curl -sS -X POST -d '{"action":"set","title":"整理会话","progress":77}' \
-       http://127.0.0.1:3183/island
-  dumpsys notification --noredact | grep -A 60 'id=4242' | grep -E 'android.title=|shortCriticalText'
-  #   android.title=String (整理会话)            ← 展开态用
-  #   android.shortCriticalText=String (整理会话 77%)   ← 折叠态用
-  ```
-  换成别的动作名 / 别的进度，胶囊文字跟着变（说明没写死）；`island set` 不带 progress 时
-  短文本就是动作名本身。
-
-### I4. 切回 App 岛上就闪一下「启动中」（v1.2.31 已修）
-
-- **现象**（用户实测）："时不时还会出现启动中的状态，不知道怎么触发的"。
-- **根因**（代码必然，不是偶发）：`MainActivity.onResume()` 每次都调 `EngineService.start()`
-  → `onStartCommand` → `startAsForeground()`；而该方法贴的是**写死的首帧**通知
-  「DSH · 启动中」，要等下一次自动层轮询（最长 5 秒）才被纠正回「就绪」。
-  于是**每次切回 App 都会闪一下「启动中」**。
-- **修法**：`FluidCloud.foregroundNotification()` 复用**当前内容**（Agent 上报层 > 自动层 > 首帧），
-  只有真正冷启动（两层都还空着）才显示「启动中」。
-- **怎么验（已实测）**：
-  ```bash
-  input keyevent KEYCODE_HOME; sleep 2
-  am start -n app.dsh.mobile.dev/app.dsh.mobile.MainActivity; sleep 0.5
-  dumpsys notification --noredact | grep -A 60 'id=4242' | grep shortCriticalText   # 修前这里是「启动中」
-  ```
-
-### I5. 岛上的项目名指错（"不是我正在弄的那个"）（v1.2.31 已修）
-
-- **现象**（用户实测）：展开态的项目名不是当前在用的项目。
-- **根因**：自动层的项目名来自 `SessionWatcher` 的「**最近有写入**的会话」。
-  两个项目都在活跃窗口（5 分钟）内时谁最后写谁赢 —— 实测 dev 版里 `ceshi` 与 `MT2`
-  都在窗口内，于是岛上显示的是"另一个"，或者干脆显示「2 个项目」。
-  **"最近有写入" ≠ "我正在看/正在用"**，这是数据源选错了。
-- **修法**（新增一条上报链路）：
-  1. 引擎侧插件订阅 `api-session/activity`（**用户在某个会话里发消息**时引擎就发它，参数是会话 id）
-     以及 `agent/status` 里的 `payload.agent.id`（引擎的 `SessionId`，与 `api-session/status` 同源）
-     → `POST /island {"action":"active-session","sessionId":"session-<uuid>"}`；
-  2. App 侧 `SessionWatcher.projectOfSession()` 读 `$DSH_HOME/storages/workspace.json`
-     （只有这里才有"会话 id → 工作区标题"这张表），把会话 id 翻成项目名，优先用它；
-     查不到就回落到原来的启发式；
-  3. 插件顺带把 `storages/workspace.json` chmod 0644、`storages` 目录 0755 ——
-     root 模式下引擎新建的是 0600/0700，App 读不到。
-- **怎么验（已实测）**：
-  ```bash
-  curl -sS -X POST -d '{"action":"active-session","sessionId":"session-473e2c80-..."}' http://127.0.0.1:3183/island
-  dumpsys notification --noredact | grep -A 60 'id=4242' | grep android.title   # → MT2
-  ```
-  换上另一个会话 id → 岛上的项目名跟着切（实测 ceshi ⇄ MT2 都对）。
-  ⚠️ 插件那半条（订阅事件）要**真的发一条消息**才能验到，别只看接口。
+  - 重开后约 18 秒进入就绪（修前是弹「进程异常退出」+ 更久的折腾）
 
 ### I6. 「退出」的语义变了：现在是"退出 App"而不是"只停引擎"（v1.2.31 用户要求）
 
@@ -860,7 +718,7 @@
   `EngineSupervisor.onShutdownFinished()`），**再** `Process.killProcess(Process.myPid())`。
   ⚠️ 顺序不能反：一上来就杀进程，引擎是被 PTY 断开带走的，会话来不及落盘。
   等待期间用户若又打开了 App（监督器重新在跑）就**不杀**（用户改主意了）。
-- **怎么验（已实测）**：点「退出」后第 11 秒 —— App 进程消失、岛通知 0 条、
+- **怎么验（已实测）**：点「退出」后第 11 秒 —— App 进程消失、通知 0 条、
   3180 无监听、服务记录 0；logcat：
   `engine stopped; killing app process (user asked for full exit)` → `Quit itself, Pid:...`。
 - **v1.2.32 补充**：退出时连「最近任务」里的卡片也一并撤掉（用户要求"别留空壳卡片"）——
@@ -873,13 +731,9 @@
 ### 附：本轮实测出来的验证配方（下次直接用）
 
 ```bash
-# 岛当前内容（折叠态那两格）
-dumpsys notification --noredact | grep -A 60 'id=4242' | grep -E 'android.title=|shortCriticalText|PROMOTED'
-# 前台服务通知身份 + 上岛标志
-dumpsys notification --noredact | grep -A 3 'pkg=app.dsh.mobile.dev.*id=4242' | grep 'flags='
-#   期望：ONGOING_EVENT|NO_CLEAR|FOREGROUND_SERVICE|PROMOTED_ONGOING
-# 开关（设置页「流体云状态岛」）落库在哪
-cat /data/user/0/app.dsh.mobile.dev/shared_prefs/dsh_ui.xml     # key: island_enabled
+# 前台服务通知身份（通知文案：待启动 / 正在启动引擎… / 引擎已就绪 / 进程异常退出…）
+dumpsys notification --noredact | grep -A 3 'pkg=app.dsh.mobile.dev.*id=42' | grep 'flags='
+#   期望：ONGOING_EVENT|NO_CLEAR|FOREGROUND_SERVICE
 # 引擎侧监督器日志（含 I1 的等待证据）
 logcat -d | grep EngineSupervisor        # healthy / exited / previous engine shutdown finished after ...
 # 单测（本地跑不了，看 CI 的 testDebugUnitTest 步骤）
@@ -892,7 +746,7 @@ logcat -d | grep EngineSupervisor        # healthy / exited / previous engine sh
 
 ---
 
-## J. 界面改版 · v1.2.36~v1.2.44 修掉的问题（J1~J6）
+## J. 界面改版 · v1.2.36~v1.2.44 修掉的问题（J1~J7）
 
 > 界面改版（底部玻璃导航 + 四页合一 + 全屏）过程中真机踩到的坑。用户报障 → 查根因 → 修法 → 验证，
 > 格式与 I 节一致。**改界面、切页、底栏、重启引擎之前建议先读这一节。**
@@ -957,6 +811,7 @@ logcat -d | grep EngineSupervisor        # healthy / exited / previous engine sh
 - **修法**：`MainActivity.renderCapsule()` 删掉状态那一支，胶囊只在
   「对话页 + 预览模式」出现（「← 主页」）；顺带删掉只服务于它的 `engineState` 字段。
 - **验证**：启动过程中截图，顶部区域不再有任何玻璃块；预览模式下「← 主页」照常出现。
+  （v1.2.44 连预览模式那一枚也整条删掉了，见 J7。）
 - **教训**：**同一个信息不要有两个出口**；设计稿里的"兼任"要先问一句"这个场景真的会出现吗"。
 
 ### J6. ★★全屏窗口漏处理 IME inset → 键盘盖住底部输入框（v1.2.44 已修）

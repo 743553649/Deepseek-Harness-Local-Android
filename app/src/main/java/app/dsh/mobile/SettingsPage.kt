@@ -15,7 +15,6 @@ import android.widget.Toast
 import app.dsh.mobile.engine.EngineSupervisor
 import app.dsh.mobile.engine.PrivMode
 import app.dsh.mobile.engine.Privilege
-import app.dsh.mobile.service.EngineService
 
 /**
  * 设置页（底栏第二个目的地）。
@@ -36,7 +35,6 @@ class SettingsPage(
     private var pageScale = DEFAULT_PAGE_SCALE
 
     private lateinit var swLandscape: GlassSwitch
-    private lateinit var swIsland: GlassSwitch
     private lateinit var engineDot: View
     private lateinit var engineState: TextView
     private lateinit var engineAddress: TextView
@@ -85,13 +83,6 @@ class SettingsPage(
         // —— 显示：页面缩放 ——
         host.findViewById<LinearLayout>(R.id.rowScale).setOnClickListener { showScaleDialog() }
 
-        // —— 显示：流体云状态岛（系统不支持时藏掉开关，用文字说明）——
-        swIsland = host.findViewById(R.id.swIsland)
-        swIsland.onCheckedChange = { on -> applyIsland(on) }
-        host.findViewById<LinearLayout>(R.id.rowIsland).setOnClickListener {
-            if (FluidCloud.supported) applyIsland(!swIsland.isChecked)
-        }
-
         // —— 权限中心 ——
         host.findViewById<LinearLayout>(R.id.rowPriv).setOnClickListener { showPrivDialog() }
         host.findViewById<LinearLayout>(R.id.rowAccess).setOnClickListener { handleAccessibility() }
@@ -106,12 +97,6 @@ class SettingsPage(
         pageScale = prefs.getInt(KEY_PAGE_SCALE, DEFAULT_PAGE_SCALE)
 
         swLandscape.isChecked = landscape
-        swIsland.isChecked = FluidCloud.enabled(host)
-        // 系统不支持流体云时：开关藏起来，右侧用文字说明，别给个点了没反应的开关
-        val islandValue = host.findViewById<TextView>(R.id.valIsland)
-        swIsland.visibility = if (FluidCloud.supported) View.VISIBLE else View.GONE
-        islandValue.visibility = if (FluidCloud.supported) View.GONE else View.VISIBLE
-        if (!FluidCloud.supported) islandValue.text = host.getString(R.string.setting_island_unsupported)
 
         host.findViewById<TextView>(R.id.valScale).text = "$pageScale%"
         host.findViewById<TextView>(R.id.valPriv).text = privLabel(Privilege.getMode(host))
@@ -229,24 +214,6 @@ class SettingsPage(
             .edit().putBoolean(KEY_LANDSCAPE, on).apply()
         // 第 2 步：设置页和对话页在同一个 Activity 里，所以可以**立刻**生效
         onLandscapeChanged(on)
-    }
-
-    // ================= 显示：流体云状态岛 =================
-
-    /**
-     * 流体云开关（默认开）。落库后让常驻服务**立刻换通知风格**（岛 ↔ 普通前台通知），
-     * **不重启引擎** —— 开关不该打断正在跑的会话。
-     * 服务没在跑时不发意图（免得"改个开关把引擎拉起来"），只提示下次启动生效。
-     */
-    private fun applyIsland(on: Boolean) {
-        if (!FluidCloud.supported) return
-        swIsland.isChecked = on
-        host.getSharedPreferences(PREFS_UI, Activity.MODE_PRIVATE)
-            .edit().putBoolean(FluidCloud.KEY_ISLAND_ENABLED, on).apply()
-        if (!on) FluidCloud.hide(host)
-        if (!EngineService.refreshNotificationIfRunning(host)) {
-            Toast.makeText(host, host.getString(R.string.setting_island_idle_hint), Toast.LENGTH_SHORT).show()
-        }
     }
 
     // ================= 显示：页面缩放 =================

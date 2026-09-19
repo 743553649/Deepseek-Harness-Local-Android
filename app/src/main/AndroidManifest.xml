@@ -7,8 +7,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 13+ 通知为运行时权限，任务进度通知需要 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- 【一次性探针 · 验证完即删】Android 16 live update（ColorOS 16 流体云）所需；normal 权限，装机自动授予 -->
-    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application

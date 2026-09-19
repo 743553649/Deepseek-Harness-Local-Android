@@ -28,7 +28,7 @@ Three privilege tiers on demand — Normal (sandbox, default) for everyday use; 
 
 - **Operate the phone screen (not blind)**: once the accessibility service is enabled, the Agent can **read screen content** (texts + coordinates) and tap precisely by text or coordinates — automating other apps
 - **Task-completion push**: the Agent sends an Android system notification when a long task finishes — never miss a background job
-- **Status island (Fluid Cloud)**: on ColorOS 16 the status-bar capsule stays resident once the engine is ready — `project · ready`, `working` while the Agent runs, `N projects` when several are active, `engine error` when it keeps crash-restarting. The Agent can report an explicit action with a percentage (`island set "tidy up" 60` → `tidy up 60%`; `island done` → `✓ done` until the next task). Tap the capsule to expand it for the project, progress and an Exit button. **Settings → Fluid status island** turns it off (falls back to a plain notification, no engine restart)
+- **Resident notification & full exit**: engine status stays in the notification shade (`starting…` / `ready` / the reason when it keeps crash-restarting) and tapping it returns you to the app. Its **Exit** action really exits (engine shuts down gracefully → the app process is killed → the recents card is removed too, so no empty shell is left behind); reopening right after exiting no longer errors out
 
 **Strictly local data**
 The engine listens on `127.0.0.1` only; sessions, credentials, and workspaces live in the app's private storage — switch phones or uninstall, and your data goes exactly where you decide.
@@ -126,7 +126,7 @@ Alternatively, fork the repo and run the **android-build** workflow on GitHub Ac
 | Document | Audience | What is inside |
 |---|---|---|
 | **This file** | Users | Product overview, install, FAQ |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Contributors / agents | Code map: what each file owns, engine startup chain, ports and directories, the four data flows (incl. the fluid-cloud island), CI pipeline, diff vs upstream |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Contributors / agents | Code map: what each file owns, engine startup chain, ports and directories, the three data flows, CI pipeline, diff vs upstream |
 | [`docs/PITFALLS.md`](docs/PITFALLS.md) | Contributors / agents | Pitfall log (sections A~J, each as symptom → root cause → fix → verification) plus real-device verification recipes |
 | [`docs/UI-REDESIGN.md`](docs/UI-REDESIGN.md) | Contributors / agents | UI design: bottom glass navigation, liquid-glass tokens, and **what to watch out for when embedding the engine WebUI**; the shipped form is in §9 |
 | [`AGENTS.md`](AGENTS.md) | AI agents | Repo entry point: hard constraints, verification discipline, collaboration rules |

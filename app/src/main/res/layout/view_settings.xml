@@ -155,42 +155,6 @@
                 android:background="@color/hair" />
 
             <LinearLayout
-                android:id="@+id/rowIsland"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/setting_island"
-                    android:textColor="@color/ink"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/valIsland"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/muted"
-                    android:textSize="12.5sp"
-                    android:visibility="gone" />
-
-                <app.dsh.mobile.GlassSwitch
-                    android:id="@+id/swIsland"
-                    android:layout_width="44dp"
-                    android:layout_height="26dp" />
-            </LinearLayout>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginHorizontal="16dp"
-                android:background="@color/hair" />
-
-            <LinearLayout
                 android:id="@+id/rowScale"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"

@@ -264,7 +264,6 @@ class EngineSupervisor(private val ctx: Context) {
 
     /**
      * 监督循环是否在跑（≈ 常驻服务在跑）。
-     * 设置页改流体云开关时用它判断要不要立刻刷新通知 —— 服务没跑就别发意图，否则会把引擎拉起来。
      */
     val running: Boolean get() = loopJob?.isActive == true
 
@@ -516,8 +515,6 @@ class EngineSupervisor(private val ctx: Context) {
             logFile = logFile(),
             suPath = suPath,
             port = EngineConfig.DEFAULT_PORT,
-            // v1.2.27：流体云插件补丁层（流体云需要知道"Agent 在思考/在执行"）
-            patchFile = EngineConfig.fluidCloudPatch(ctx),
         )
     }
 

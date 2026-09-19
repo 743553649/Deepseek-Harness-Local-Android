@@ -235,7 +235,8 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 ### 4.5 ~~引擎状态文本搬家后，要留一个"出问题时看得见"的出口~~（状态那一半已回退，v1.2.43）
 
-> **后续变化**：胶囊的「说明原因」这一半**已删除**，只保留「← 主页」（§4.6）。
+> **后续变化**：胶囊的「说明原因」这一半**已删除**，只保留「← 主页」（§4.6）；
+> v1.2.44 那一枚「← 主页」也**整条删掉了**（`PITFALLS.md` J7），回主会话改走系统返回键。
 > 原因：引擎只要不就绪，加载页就会盖住对话页、并把原因写在加载页上，
 > 再浮一枚胶囊纯属重复表达（用户报障「启动页顶部多了个浮岛显示引擎启动中」）。
 > 下面是当初的设计理由，保留备查。
@@ -246,7 +247,12 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 - **建议**：状态 ≠ Ready 时，在对话页顶部浮一枚玻璃小胶囊（「引擎启动中…」/「进程异常退出，%d 秒后重启」）。正常时不显示。这个胶囊是**唯一**允许出现在对话页上的 App 元素。
 - 设置页的引擎卡片要能拿到状态：设置页是独立 Activity，拿不到 `MainActivity` 的 collector → 打开设置页时从 `(application as DshApp).supervisor` 取一次快照，并在 `onResume` 刷新。
 
-### 4.6 「预览模式返回按钮」要重新安置
+### 4.6 ~~「预览模式返回按钮」要重新安置~~（已删除，v1.2.44）
+
+> **后续变化**：这条建议**作废**。胶囊先是在 v1.2.43 只剩「← 主页」，
+> v1.2.44 连这一枚也**整条删掉**了（`PITFALLS.md` J7：靠导航事件维持显隐，失效模式是"关不掉"）——
+> 从预览页回主会话交给**系统返回键**（`onBackPressed` 能退网页就退网页，退不了才最小化）。
+> 下面是当初的设计理由，保留备查。
 
 `btnBack` 现在也在顶部导航栏里（WebView 落在非引擎端口的回环页面时才显示）。导航栏删掉后它没有家了。
 **建议**：同一枚「引擎状态胶囊」兼任——预览模式时变成「← 主页」（复用 `healthyWebUrl` 重取，见 `ARCHITECTURE.md` 关于会话 cookie 过期的说明）。
@@ -265,9 +271,9 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 > 开了全屏就得自己接管 insets —— 顶部状态栏、底部键盘都得代码摆位，
 > **漏掉键盘就是输入栏被盖住**（`PITFALLS.md` J6，v1.2.44 已修）。
 
-### 4.9 不要碰流体云状态岛的生命周期不变量
+### 4.9 不要碰前台服务 / 通知 / 退出链路的生命周期不变量
 
-`EngineService` 的前台通知、退出顺序、`START_NOT_STICKY` 等（`AGENTS.md` 与 `docs/PITFALLS.md` I 节）。这次改版**完全不需要动 `EngineService`**，如果发现"非动不可"，先停下来核对 §I1~I6。
+`EngineService` 的前台通知、退出顺序、`START_NOT_STICKY` 等（`AGENTS.md` 与 `docs/PITFALLS.md` H2~H5、I1、I6）。这次改版**完全不需要动 `EngineService`**，如果发现"非动不可"，先停下来核对这些条目。
 
 ### 4.10 ~~别删 AboutActivity，先留着~~（已在 v1.2.39 删除）
 
@@ -332,7 +338,7 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 建议：先建 `res/values/colors.xml` 把 §2 的颜色落成资源，再把上面这些**受影响的位置**换成引用。
 不要在本次顺手重构所有硬编码颜色 —— 范围会失控。
-| `app/src/main/res/drawable/` | 新增 `bg_glass_island.xml`（**后被 `bg_glass_bar.xml` 取代**）`bg_glass_card.xml` `bg_nav_pill.xml` `bg_switch_track.xml`（**实际没建：开关是代码自绘的**，见 `GlassSwitch.kt`）`ic_nav_chat.xml` `ic_nav_ext.xml` `ic_nav_settings.xml`（+ 后加的 `ic_nav_about.xml`）`bg_glass_pill.xml` `bg_glass_hero.xml` `bg_page.xml`；旧的 `bg_drawer.xml` `ic_menu.xml` 变成死文件（留着没删） |
+| `app/src/main/res/drawable/` | 新增 `bg_glass_island.xml`（**后被 `bg_glass_bar.xml` 取代**）`bg_glass_card.xml` `bg_nav_pill.xml` `bg_switch_track.xml`（**实际没建：开关是代码自绘的**，见 `GlassSwitch.kt`）`ic_nav_chat.xml` `ic_nav_ext.xml` `ic_nav_settings.xml`（+ 后加的 `ic_nav_about.xml`）`bg_glass_pill.xml`（**v1.2.44 随预览胶囊一起删除**）`bg_glass_hero.xml` `bg_page.xml`；旧的 `bg_drawer.xml` `ic_menu.xml` 变成死文件（留着没删） |
 | `app/src/main/res/values/colors.xml` | **新建**：把 §2 的颜色落成资源 |
 | `app/src/main/res/values/themes.xml` | `statusBarColor` / `navigationBarColor` / `windowBackground` → `#FFF5F7FB` |
 | `app/src/main/res/values/strings.xml` | 新增底栏三项、设置页分组、引擎卡片文案；旧的 `nav_menu` / `drawer_*` 系列可删 |
@@ -355,7 +361,7 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 - [x] 切页过渡：不闪
 - [x] 启动页观感：自绘转圈 + 胶囊进度条
 - [x] 全屏：状态栏那一块显示页面底色、内容不被状态栏压住
-- [x] 启动页顶部没有多余的重复胶囊（胶囊只在预览模式出现）
+- [x] 启动页顶部没有多余的重复胶囊（v1.2.43 时胶囊只在预览模式出现；**v1.2.44 整条删除**，见 §9.2 第 12 条）
 - [x] 深色模式仍是关闭状态（`forceDarkAllowed=false` 未动）
 - [x] `aapt2 dump badging`：包名仍是 `app.dsh.mobile.dev`
 
@@ -374,8 +380,8 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 |---|---|
 | 对话页的玻璃是"形状玻璃"（底下是白，没有东西可糊） | **接受**。4.2 决定了它不能盖住网页，4.3 决定了真模糊不指望 |
 | 设置/扩展页的真模糊 | **降级为观感玻璃**（见 4.3）。真模糊留作以后的可选增强 |
-| 引擎异常状态怎么让用户看见 | 待实现（4.5 给了建议方案） |
-| 预览返回按钮的新位置 | 待实现（4.6 给了建议方案） |
+| 引擎异常状态怎么让用户看见 | **已作废**：状态写在启动页（加载页）上，顶部不再有胶囊（§9.2 第 12 条） |
+| 预览返回按钮的新位置 | **已作废**：那枚「← 主页」胶囊 v1.2.44 整条删除，回主会话用系统返回键（`PITFALLS.md` J7） |
 | 横屏时岛宽 | **已作废**：底栏改成铺满整宽，不存在"岛宽"问题（§9） |
 | `AboutActivity` 死代码清理 | **已做**（v1.2.39 删除；「关于」改成底栏第四格） |
 | 底栏常驻 | **已做**（v1.2.36 四页合一 + 切页过渡动画） |
@@ -383,7 +389,7 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 ---
 
-## 9. 实际落地（v1.2.36 ~ v1.2.43）与定稿的差异
+## 9. 实际落地（v1.2.36 ~ v1.2.44）与定稿的差异
 
 > 实现过程中用户看了真机效果后又改了几处设计。**本节是最终形态的唯一依据**；
 > 前面各节保留的是当初的设计理由，凡与本节冲突的，以本节为准。
@@ -407,7 +413,7 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 | 页面 | 内容 | 实现 |
 |---|---|---|
-| 对话 | 纯 WebView（不放任何 App 元素，只有引擎未就绪时顶部那枚胶囊） | `activity_main.xml` 的 `chatPage` |
+| 对话 | 纯 WebView（**不放任何 App 元素**；v1.2.44 起顶部那枚胶囊已删除） | `activity_main.xml` 的 `chatPage` |
 | 扩展 | 扩展列表，按分类各包一块玻璃面板 | `view_extensions.xml` + `ExtensionPage.kt` |
 | 设置 | 引擎卡片（主角）→ 显示 → 权限中心 | `view_settings.xml` + `SettingsPage.kt` |
 | 关于 | 项目信息 / 版本 / 开源地址 | `view_about.xml` + `AboutPage.kt` |
@@ -427,7 +433,7 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 | 9 | —（v1.2.38 试过"运行时取网页底色"） | **已废弃**，改成按页面固定垫色 | 取网页底色对"白 vs 蓝"的观感没帮助，代码还多一层耦合 |
 | 10 | 启动页用系统 ProgressBar（转圈 + 细线进度条） | **两个都自绘**：`GlassSpinner`（轨道 + 250° 主色渐变圆弧匀速转）、`GlassProgress`（胶囊轨道 + 渐变，不确定态来回扫）；两者**二选一**，不再同时出现 | 用户：系统那套"很简陋廉价" |
 | 11 | 窗口不延伸到系统栏（§4.8 明确要求不开 edge-to-edge） | **主界面开全屏**：覆盖状态栏、状态栏透明、内容下移一个状态栏高度 | 用户要求"App 全屏覆盖，状态栏也要覆盖到" |
-| 12 | 顶部胶囊兼任「引擎未就绪时说明原因」（§4.5） | **只保留「← 主页」**，状态那一半删除 | 用户：启动页顶部多了一枚重复的「引擎启动中」胶囊 |
+| 12 | 顶部胶囊兼任「引擎未就绪时说明原因」（§4.5） | **整条删除**：状态那一半 v1.2.43 先删，预览模式的「← 主页」v1.2.44 也删（`PITFALLS.md` J7），回主会话改用系统返回键 | 用户：启动页顶部多了枚重复的「引擎启动中」胶囊；后来预览返回胶囊又「点了不消失」 |
 
 ### 9.3 文件增删（相对 §6）
 
@@ -435,13 +441,14 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 - 页面：`res/layout/view_settings.xml` / `view_extensions.xml` / `view_about.xml`（由 `activity_main.xml` include）
 - 逻辑：`SettingsPage.kt` / `ExtensionPage.kt` / `AboutPage.kt` / `GlassSwitch.kt`（自绘玻璃开关）/ `Motion.kt`（「减少动态效果」判定的唯一入口）/ `GlassSpinner.kt` + `GlassProgress.kt`（启动页自绘转圈与进度条）
-- drawable：`bg_glass_bar.xml`（底栏玻璃）、`bg_glass_card.xml`、`bg_glass_hero.xml`（引擎卡片）、`bg_glass_pill.xml`（顶部胶囊）、`bg_nav_pill.xml`（选中态胶囊）、`bg_page.xml`（页面渐变 + 三团光晕）、`ic_nav_chat/ext/settings/about.xml`
+- drawable：`bg_glass_bar.xml`（底栏玻璃）、`bg_glass_card.xml`、`bg_glass_hero.xml`（引擎卡片）、`bg_glass_pill.xml`（顶部胶囊，**v1.2.44 随胶囊一并删除**）、`bg_nav_pill.xml`（选中态胶囊）、`bg_page.xml`（页面渐变 + 三团光晕）、`ic_nav_chat/ext/settings/about.xml`
 - `res/values/colors.xml`（§2 的设计令牌收口）
 
 **删除**
 
 - `SettingsActivity.kt` / `ExtensionStoreActivity.kt`（v1.2.36）、`AboutActivity.kt`（v1.2.39）+ 各自的 layout + Manifest 条目
 - `bg_glass_island.xml`（v1.2.40，被 `bg_glass_bar.xml` 取代）
+- 顶部胶囊全套（v1.2.44）：`activity_main.xml` 里的胶囊、`bg_glass_pill.xml`、`btn_back` 字符串，以及 `MainActivity` 的 `capsule` / `capsuleText` / `previewMode` / `CAPSULE_TOP_DP` 字段与 `setupCapsule()` / `renderCapsule()` / `updatePreviewChrome()`（`PITFALLS.md` J7）
 - 抽屉遗留：`bg_drawer.xml`、`ic_menu.xml`（死文件，留着没删）
 
 ### 9.4 以后再改界面，这六条是硬约束
@@ -462,6 +469,6 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 ## 附：相关文档
 
 - `docs/ARCHITECTURE.md` —— 引擎启动链路、WebUI 会话认证（token）、关键文件职责表
-- `docs/PITFALLS.md` —— 踩坑记录（A~J 节）。改通知/引擎相关代码前必读 I 节；
-  **改界面/切页/底栏/全屏前必读 J 节**（界面线程停引擎、设计前提翻车、玻璃按钮隐身、产物下载损坏、键盘遮挡）
+- `docs/PITFALLS.md` —— 踩坑记录（A~J 节）。改通知/前台服务/引擎退出相关代码前必读 H 节与 I 节；
+  **改界面/切页/底栏/全屏前必读 J 节**（界面线程停引擎、设计前提翻车、玻璃按钮隐身、产物下载损坏、键盘遮挡、胶囊删除）
 - 仓库根 `AGENTS.md` —— 硬约束（`targetSdk=28` 不可动）、开发循环、验证纪律
