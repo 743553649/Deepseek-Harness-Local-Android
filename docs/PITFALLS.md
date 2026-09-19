@@ -977,3 +977,20 @@ logcat -d | grep EngineSupervisor        # healthy / exited / previous engine sh
 - **教训**：**接管 insets 就要接管全部四条边**。开了 edge-to-edge 之后，顶部状态栏、底部导航栏、
   键盘三样都得自己摆位，漏一个就是这个症状；而且新系统上「设了 `adjustResize` 就万事大吉」不再成立。
 
+
+### J7. ★预览返回胶囊「点了不消失」→ 整条删掉（v1.2.44 已删）
+
+- **现象**（用户报障）：打开 AI 给的预览链接后，屏幕顶部出现一枚悬浮框（返回 / 重启），
+  点「返回主会话」之后它不跟着消失。
+- **根因**：这枚悬浮框的显隐**只**由 WebView 的 `doUpdateVisitedHistory` 驱动
+  （`updatePreviewChrome()` → `renderCapsule()`）。这条链路里只要有一次导航事件没来，
+  或者引擎没就绪、连"回主会话"的 URL 都拼不出来（`healthyPort == 0`），胶囊就留在屏幕上。
+  官方版那条悬浮工具栏是同一套逻辑，所以它也有同样的毛病。
+- **修法**：**不再自造这个控件** —— `MainActivity` 删掉 `capsule` / `capsuleText` / `previewMode` /
+  `CAPSULE_TOP_DP` 字段与 `setupCapsule()` / `renderCapsule()` / `updatePreviewChrome()` 及其全部调用点；
+  布局里的胶囊、以及随它失去引用的 `bg_glass_pill.xml` 与 `btn_back` 字符串一并删除。
+  从预览页回主会话交给**系统返回键**：`onBackPressed()` 本来就是"能退网页就退网页，
+  退不了才最小化"，不需要额外 UI。
+- **验证**：CI 编译通过；解包核对 `resources.arsc` 里 `btn_back` / `capsule` 已无命中。
+- **教训**：给"回上一屏"做的临时浮层，**能复用系统返回键就别自造控件**；
+  靠导航事件维持显隐的悬浮控件，失效模式是"关不掉"，比没有还糟。

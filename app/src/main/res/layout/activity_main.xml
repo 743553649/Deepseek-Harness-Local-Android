@@ -13,7 +13,6 @@
     │   │   ├─ settingsPage / extensionsPage / aboutPage（include 进来的三个页面，透明底）
     │   │   ├─ loading（引擎就绪前的加载页：只盖对话页，不盖底栏，也不盖设置/扩展）
     │   └─ navArea（72dp 占位区，里面是铺满底栏的玻璃条；加载完成前整体隐藏）
-    └─ capsule（对话页顶部小胶囊：引擎未就绪时说明原因 / 预览模式时变「← 主页」）
 
   ⚠️ 底栏绝不能盖住网页的输入框（docs/UI-REDESIGN.md §4.2）：
     WebView 用 weight=1 自己变矮，底栏是它下面的兄弟节点，不是叠在它上面。
@@ -257,28 +256,4 @@
         </FrameLayout>
     </LinearLayout>
 
-    <!-- 顶部小胶囊：只在「对话页 + 预览模式」出现（「← 主页」，§4.6）。
-         引擎未就绪时不显示 —— 那时加载页已经盖住对话页并写明了原因。 -->
-    <LinearLayout
-        android:id="@+id/capsule"
-        android:layout_width="wrap_content"
-        android:layout_height="32dp"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="10dp"
-        android:background="@drawable/bg_glass_pill"
-        android:elevation="12dp"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="14dp"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/capsuleText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxWidth="260dp"
-            android:singleLine="true"
-            android:textColor="@color/muted"
-            android:textSize="12.5sp" />
-    </LinearLayout>
 </FrameLayout>

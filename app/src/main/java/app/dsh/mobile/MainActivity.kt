@@ -8,14 +8,11 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PorterDuff
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.animation.PathInterpolator
 import android.webkit.WebResourceError
@@ -88,13 +85,6 @@ class MainActivity : Activity() {
     private lateinit var navPill: View
     private var navIndex = 0
 
-    // —— 对话页顶部小胶囊（引擎状态 / 预览返回）——
-    private lateinit var capsule: View
-    private lateinit var capsuleText: TextView
-
-    /** WebView 是否停在非引擎端口的回环页（预览模式）—— 胶囊变成「← 主页」 */
-    private var previewMode = false
-
     /** 桌面模式：桌面 UA + 固定 1280px 视口 + 手势缩放（手机浏览器"电脑模式"等价物） */
     private var desktopMode = false
     private var defaultUa: String = ""
@@ -145,7 +135,6 @@ class MainActivity : Activity() {
         aboutPage.bind()
 
         setupNav()
-        setupCapsule()
         setupEdgeToEdge()
         readUiPrefs()
         if (landscapeMode) {
@@ -229,19 +218,14 @@ class MainActivity : Activity() {
         rootView.setPadding(0, 0, 0, ime)
     }
 
-    /** 状态栏内边距变了（首次布局 / 旋转 / 刘海机型）：把四个页面和顶部胶囊一起下移 */
+    /** 状态栏内边距变了（首次布局 / 旋转 / 刘海机型）：把四个页面一起下移 */
     private fun applyStatusBarInset(top: Int) {
         if (top == statusBarInset) return
         statusBarInset = top
         for (page in listOf(chatPage, extensionsPageView, settingsPageView, aboutPageView)) {
             page.setPadding(0, top, 0, 0)
         }
-        if (::capsule.isInitialized) {
-            (capsule.layoutParams as ViewGroup.MarginLayoutParams).topMargin = dp(CAPSULE_TOP_DP) + top
-        }
     }
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     /** 兜底：万一系统不给 inset（HDR/新版本兼容路径），直接读状态栏高度资源 */
     private fun statusBarHeightRes(): Int {
@@ -274,13 +258,6 @@ class MainActivity : Activity() {
                 return true
             }
 
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                super.onPageStarted(view, url, favicon)
-                // 导航一开始就校准胶囊：doUpdateVisitedHistory 只在历史真的变化时来，
-                // 单靠它就有"回了主会话胶囊还挂着"的窗口（用户报障）。
-                updatePreviewChrome(url)
-            }
-
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (view == null) return
@@ -304,11 +281,6 @@ class MainActivity : Activity() {
                 view.evaluateJavascript(portraitViewportJs(pageScale / 100f), null)
             }
 
-            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                super.doUpdateVisitedHistory(view, url, isReload)
-                updatePreviewChrome(url)
-            }
-
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -319,19 +291,6 @@ class MainActivity : Activity() {
                 if (request?.isForMainFrame == true) setLoading(false)
             }
         }
-    }
-
-    /**
-     * 预览 chrome：WebView 导航到非引擎端口的回环页面（用户点击 AI 在对话里给的
-     * http://127.0.0.1:PORT 链接）时，顶部胶囊变成「← 主页」；
-     * 回到引擎主界面自动恢复。AI 无需任何特殊协议，输出普通链接即可。
-     */
-    private fun updatePreviewChrome(url: String?) {
-        val uri = url?.let { Uri.parse(it) } ?: return
-        val loopback = uri.host == "127.0.0.1" || uri.host == "localhost"
-        val enginePort = (application as DshApp).supervisor.healthyPort
-        previewMode = loopback && uri.port != enginePort
-        renderCapsule()
     }
 
     /** 统一的回环页加载入口：缩放统一由 onPageFinished 的 viewport meta 接管，这里只导航。 */
@@ -409,7 +368,6 @@ class MainActivity : Activity() {
         selectNav(index, animate)
         applyBarBackdrop()
         updateBarVisibility(animate)
-        renderCapsule()
         onPageShown(index)
     }
 
@@ -526,49 +484,6 @@ class MainActivity : Activity() {
         applyZoomControls(enable)
     }
 
-    // ---------------- 顶部小胶囊 ----------------
-
-    private fun setupCapsule() {
-        capsule = findViewById(R.id.capsule)
-        capsuleText = findViewById(R.id.capsuleText)
-        // 预览模式点它回引擎主界面：必须重取引擎宣布的带 token 入口（会话 cookie 可能已过期）
-        capsule.setOnClickListener {
-            val sup = (application as DshApp).supervisor
-            // 引擎没就绪时连 URL 都拼不出来（healthyPort 可能是 0）：那就别假装跳转，
-            // 把胶囊原样显示回去，用户至少还知道自己停在预览页里。
-            val target = sup.healthyWebUrl
-                ?: sup.healthyPort.takeIf { it > 0 }?.let { "http://127.0.0.1:$it/" }
-            if (target == null) {
-                renderCapsule()
-                return@setOnClickListener
-            }
-            // 点了就先消失（乐观隐藏）：胶囊的显隐原本只靠 WebView 导航事件回调，
-            // 万一那一次回调不来，它就赖在屏幕上（用户报障：点了返回胶囊不消失）。
-            // 现在点击即收起，真跳出去了再由 onPageStarted / doUpdateVisitedHistory 校准。
-            capsule.visibility = View.GONE
-            loadLocalUrl(target)
-        }
-    }
-
-    /**
-     * 顶部胶囊：**只在对话页的预览模式下出现**（「← 主页」）。
-     *
-     * 它曾经还兼任「引擎未就绪时说明原因」（§4.5），但实践证明这一半是多余的：
-     * 引擎只要不就绪，加载页就会盖住对话页，原因已经写在加载页上了；
-     * 再浮一枚胶囊反而重复（用户报障：启动页顶部多了一枚「引擎启动中」胶囊）。
-     * 所以状态那一半已删除 —— 要改回来看 §4.5 与 PITFALLS J2 的教训。
-     */
-    private fun renderCapsule() {
-        if (pageIndex == 0 && previewMode) {
-            capsuleText.text = getString(R.string.btn_back)
-            capsule.isClickable = true
-            capsule.visibility = View.VISIBLE
-            return
-        }
-        capsule.isClickable = false
-        capsule.visibility = View.GONE
-    }
-
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // 旋转后屏宽变化 → 需要重算适配视口（reload 后 onPageFinished 会按当前模式
@@ -656,7 +571,6 @@ class MainActivity : Activity() {
                 getString(R.string.status_idle)
             }
         }
-        renderCapsule()
         if (::settingsPage.isInitialized) settingsPage.renderEngine(state)
         // 加载页不显示端口/域名：就绪态换成"正在进入界面…"，未启动态换成"正在启动引擎…"
         loadingStatus.text = when (state) {
@@ -723,9 +637,6 @@ class MainActivity : Activity() {
 
         /** 启动画面退场后底栏淡入的时长（和页面一起出现，别在加载时就冒出来） */
         private const val BAR_FADE_MS = 260L
-
-        /** 顶部胶囊离状态栏的间距（全屏后由代码加上状态栏高度） */
-        private const val CAPSULE_TOP_DP = 10
 
         /** 切页过渡：260ms 交叉淡入淡出 + 屏宽 6% 的横向位移 */
         private const val PAGE_MS = 260L
