@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PorterDuff
 import android.net.Uri
@@ -273,6 +274,13 @@ class MainActivity : Activity() {
                 return true
             }
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // 导航一开始就校准胶囊：doUpdateVisitedHistory 只在历史真的变化时来，
+                // 单靠它就有"回了主会话胶囊还挂着"的窗口（用户报障）。
+                updatePreviewChrome(url)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (view == null) return
@@ -526,7 +534,19 @@ class MainActivity : Activity() {
         // 预览模式点它回引擎主界面：必须重取引擎宣布的带 token 入口（会话 cookie 可能已过期）
         capsule.setOnClickListener {
             val sup = (application as DshApp).supervisor
-            loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
+            // 引擎没就绪时连 URL 都拼不出来（healthyPort 可能是 0）：那就别假装跳转，
+            // 把胶囊原样显示回去，用户至少还知道自己停在预览页里。
+            val target = sup.healthyWebUrl
+                ?: sup.healthyPort.takeIf { it > 0 }?.let { "http://127.0.0.1:$it/" }
+            if (target == null) {
+                renderCapsule()
+                return@setOnClickListener
+            }
+            // 点了就先消失（乐观隐藏）：胶囊的显隐原本只靠 WebView 导航事件回调，
+            // 万一那一次回调不来，它就赖在屏幕上（用户报障：点了返回胶囊不消失）。
+            // 现在点击即收起，真跳出去了再由 onPageStarted / doUpdateVisitedHistory 校准。
+            capsule.visibility = View.GONE
+            loadLocalUrl(target)
         }
     }
 
