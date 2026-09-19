@@ -137,7 +137,7 @@ scripts/
 | 文件 | 行数 | 职责 | 什么时候会改它 |
 |---|---|---|---|
 | `engine/ExtensionManager.kt` | 767 | 扩展中心：Termux 仓库实时安装（索引 → 依赖闭包 → .deb → 解包 → 原子发布） | 改扩展机制 |
-| `MainActivity.kt` | 700 | **主界面 = 四页合一的容器**：WebView 外壳 + 底栏玻璃导航（对话/扩展/设置/关于）+ 顶部状态胶囊 + 加载页时机；Healthy 后用 `state.webUrl`（带 token）加载；**返回键：非对话页 = 回对话页，对话页 = `moveTaskToBack`（只退到后台，不停引擎）**；**全屏**（覆盖状态栏，内容由 `applyStatusBarInset` 下移一个状态栏高度） | 改主界面 / 导航 |
+| `MainActivity.kt` | 752 | **主界面 = 四页合一的容器**：WebView 外壳 + 底栏玻璃导航（对话/扩展/设置/关于）+ 顶部状态胶囊 + 加载页时机；Healthy 后用 `state.webUrl`（带 token）加载；**返回键：非对话页 = 回对话页，对话页 = `moveTaskToBack`（只退到后台，不停引擎）**；**全屏**（覆盖状态栏，内容由 `applyStatusBarInset` 下移一个状态栏高度；**键盘由 `applyImeInset` 顶上去**） | 改主界面 / 导航 |
 | `SettingsPage.kt` | 470 | 设置页逻辑（引擎卡片 / 显示 / 权限模式 / 无障碍）；**重启引擎走 `supervisor.restartAsync()`** | 加设置项 |
 | `ExtensionPage.kt` | 395 | 扩展中心 UI（列表行是代码拼的，**保留官方品牌图标做法**） | 改扩展 UI |
 | `AboutPage.kt` | 35 | 关于页（项目信息 / 版本 / 开源地址） | 改关于页 |

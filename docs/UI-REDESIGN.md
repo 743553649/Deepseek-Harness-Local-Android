@@ -261,6 +261,10 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 `targetSdk = 28`，窗口**不延伸到系统栏下面**，所以底栏不需要额外处理 inset。
 → **不要顺手开 edge-to-edge / `setDecorFitsSystemWindows(false)`**，那会连带影响引擎页面的安全区，属于另一件事。
 
+> ⚠️ **这条后来被推翻了**：v1.2.42 起主界面按要求改成了全屏（见 §9.2 第 11 条）。
+> 开了全屏就得自己接管 insets —— 顶部状态栏、底部键盘都得代码摆位，
+> **漏掉键盘就是输入栏被盖住**（`PITFALLS.md` J6，v1.2.44 已修）。
+
 ### 4.9 不要碰流体云状态岛的生命周期不变量
 
 `EngineService` 的前台通知、退出顺序、`START_NOT_STICKY` 等（`AGENTS.md` 与 `docs/PITFALLS.md` I 节）。这次改版**完全不需要动 `EngineService`**，如果发现"非动不可"，先停下来核对 §I1~I6。
@@ -440,7 +444,7 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 - `bg_glass_island.xml`（v1.2.40，被 `bg_glass_bar.xml` 取代）
 - 抽屉遗留：`bg_drawer.xml`、`ic_menu.xml`（死文件，留着没删）
 
-### 9.4 以后再改界面，这四条是硬约束
+### 9.4 以后再改界面，这六条是硬约束
 
 1. **底栏绝不能盖住网页输入框**：竖向 LinearLayout 里 WebView `weight=1` 自己变矮；不叠层、不给 WebView 设 `paddingBottom`、不往引擎网页注入 CSS/JS（§4.2）。
 2. **界面里重启引擎只能用 `supervisor.restartAsync()`**：`restart()` 是同步的，会在主线程等引擎退出 5~10 秒（`docs/PITFALLS.md` J1）。
@@ -448,6 +452,10 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 4. **所有动画先过 `Motion.reduced(this)`**：系统开了「减少动态效果」就全部短路成终态（§2）。
 5. **全屏后的状态栏内边距由代码统一加**（`MainActivity.applyStatusBarInset`）：
    别在 XML 里给页面写死 top padding，也别给 `pageHost` 加 —— 加载页要盖到状态栏底下（全屏启动图）。
+6. **键盘也要代码让位**（`MainActivity.applyImeInset`）：全屏窗口在 Android 15+ 不再自动压矮，
+   `adjustResize` 只是请求、不生效；要靠 `WindowInsets.Type.ime()` 自己给 `rootView` 加底部 padding，
+   否则输入栏被键盘盖住（`PITFALLS.md` J6）。
+   **教训：接管了 insets 就要四边都想一遍 —— 顶部状态栏、底部导航栏、键盘，漏一个就是一个 bug。**
 
 ---
 
@@ -455,5 +463,5 @@ loadLocalUrl(sup.healthyWebUrl ?: "http://127.0.0.1:${sup.healthyPort}/")
 
 - `docs/ARCHITECTURE.md` —— 引擎启动链路、WebUI 会话认证（token）、关键文件职责表
 - `docs/PITFALLS.md` —— 踩坑记录（A~J 节）。改通知/引擎相关代码前必读 I 节；
-  **改界面/切页/底栏前必读 J 节**（界面线程停引擎、设计前提翻车、玻璃按钮隐身、产物下载损坏）
+  **改界面/切页/底栏/全屏前必读 J 节**（界面线程停引擎、设计前提翻车、玻璃按钮隐身、产物下载损坏、键盘遮挡）
 - 仓库根 `AGENTS.md` —— 硬约束（`targetSdk=28` 不可动）、开发循环、验证纪律
