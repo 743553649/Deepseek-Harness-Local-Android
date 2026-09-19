@@ -891,7 +891,7 @@ logcat -d | grep EngineSupervisor        # healthy / exited / previous engine sh
 
 ---
 
-## J. 界面改版 · v1.2.36~v1.2.43 修掉的问题（J1~J5）
+## J. 界面改版 · v1.2.36~v1.2.44 修掉的问题（J1~J6）
 
 > 界面改版（底部玻璃导航 + 四页合一 + 全屏）过程中真机踩到的坑。用户报障 → 查根因 → 修法 → 验证，
 > 格式与 I 节一致。**改界面、切页、底栏、重启引擎之前建议先读这一节。**
@@ -957,4 +957,22 @@ logcat -d | grep EngineSupervisor        # healthy / exited / previous engine sh
   「对话页 + 预览模式」出现（「← 主页」）；顺带删掉只服务于它的 `engineState` 字段。
 - **验证**：启动过程中截图，顶部区域不再有任何玻璃块；预览模式下「← 主页」照常出现。
 - **教训**：**同一个信息不要有两个出口**；设计稿里的"兼任"要先问一句"这个场景真的会出现吗"。
+
+### J6. ★★全屏窗口漏处理 IME inset → 键盘盖住底部输入框（v1.2.44 已修）
+
+- **现象**（用户报障）：点开输入法，底部输入栏被键盘整个盖住，看不见自己在打什么。
+- **根因**：`MainActivity.setupEdgeToEdge()` 为「覆盖状态栏」把窗口设成全屏
+  （`SYSTEM_UI_FLAG_LAYOUT_STABLE or SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN`），
+  但它的 `setOnApplyWindowInsetsListener` **只取了 `systemWindowInsetTop` 把内容下移，底部 IME 一字未提**。
+  窗口一旦是全屏的，**Android 15+ 就不再自动把窗口压矮** —— `adjustResize` 只是个请求，不生效。
+  真机实测（键盘弹起时 `dumpsys window`）：窗口 `mAppBounds=Rect(0, 135 - 1216, 2639)`，
+  底边 2639 就是屏幕底，纹丝不动。网页 `height:100%` 跟着窗口走，输入栏于是钉在屏幕底、被键盘压住。
+- **修法**：新增 `applyImeInset(insets)` —— 取 `WindowInsets.Type.ime().bottom`（键盘高度），
+  给 `rootView` 加等高的底部 padding，内容整体顶上去，键盘正好填进那块空位。
+  只在 API 30+ 生效：更早的系统窗口本来就会自动压缩，平台也不分发 ime inset。
+- **验证**：CI 产物解出 `classes4.dex` 后 `rg -a applyImeInset` 能搜到（改动确实进了二进制）；
+  包名 `app.dsh.mobile.dev`、签名与已装版 SHA-256 一致、versionCode 91 > 90 故可覆盖安装。
+  **用户已实测确认：不再遮挡。**
+- **教训**：**接管 insets 就要接管全部四条边**。开了 edge-to-edge 之后，顶部状态栏、底部导航栏、
+  键盘三样都得自己摆位，漏一个就是这个症状；而且新系统上「设了 `adjustResize` 就万事大吉」不再成立。
 
