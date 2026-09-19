@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.animation.PathInterpolator
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -54,6 +55,9 @@ class MainActivity : Activity() {
     // —— 全屏（覆盖状态栏）——
     private lateinit var rootView: View
     private var statusBarInset = -1
+
+    /** 当前键盘高度（px）。窗口是全屏的，系统不再自己压缩，改由 [applyImeInset] 把内容顶上去 */
+    private var imeInset = 0
 
     // —— 引擎就绪前的加载页 ——
     private lateinit var loading: View
@@ -203,9 +207,25 @@ class MainActivity : Activity() {
             @Suppress("DEPRECATION")
             val top = insets.systemWindowInsetTop.takeIf { it > 0 } ?: statusBarHeightRes()
             applyStatusBarInset(top)
+            applyImeInset(insets)
             insets
         }
         rootView.requestApplyInsets()
+    }
+
+    /**
+     * 键盘：窗口是全屏的（见 [setupEdgeToEdge]），Android 15+ 对这种窗口不再自动把窗口压矮，
+     * 键盘直接盖在页面上 —— 网页底部的输入框被挡住，看不见自己在打什么。
+     * 这里自己把内容整体顶上去：底部留出键盘那么高的一块空位，键盘正好填进去。
+     *
+     * 只在 API 30+ 处理：更早的系统窗口本来就会随键盘自动压缩，平台也不分发 ime inset。
+     */
+    private fun applyImeInset(insets: WindowInsets) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val ime = insets.getInsets(WindowInsets.Type.ime()).bottom
+        if (ime == imeInset) return
+        imeInset = ime
+        rootView.setPadding(0, 0, 0, ime)
     }
 
     /** 状态栏内边距变了（首次布局 / 旋转 / 刘海机型）：把四个页面和顶部胶囊一起下移 */
